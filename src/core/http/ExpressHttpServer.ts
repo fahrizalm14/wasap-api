@@ -49,6 +49,10 @@ export class ExpressHttpServer implements HttpServer {
           reply: res,
         });
 
+        if (result?.raw) {
+          return;
+        }
+
         const status = result?.status ?? 200;
         if (result?.body === undefined) {
           res.sendStatus(status);

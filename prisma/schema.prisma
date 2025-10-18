@@ -14,3 +14,36 @@ model User {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 }
+
+enum WhatsappSessionStatus {
+  CONNECTED
+  DISCONNECTED
+  QR
+  LOGGED_OUT
+  ERROR
+}
+
+model WhatsappSession {
+  id          Int                    @id @default(autoincrement())
+  apiKey      String                 @unique
+  displayName String?
+  status      WhatsappSessionStatus  @default(DISCONNECTED)
+  creds       Json?
+  createdAt   DateTime               @default(now())
+  updatedAt   DateTime               @updatedAt
+
+  credentials WhatsappCredential[]
+}
+
+model WhatsappCredential {
+  id        Int              @id @default(autoincrement())
+  session   WhatsappSession  @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+  sessionId Int
+  type      String
+  keyId     String
+  value     Json?
+  createdAt DateTime         @default(now())
+  updatedAt DateTime         @updatedAt
+
+  @@unique([sessionId, type, keyId])
+}

@@ -1,10 +1,7 @@
 import { inject, injectable } from 'tsyringe';
 
-import {
-  IUsers,
-  IUsersRepository,
-  USERS_REPOSITORY_TOKEN,
-} from '@/modules/users/users.interface';
+import type { IUsers, IUsersRepository } from '@/modules/users/users.interface';
+import { USERS_REPOSITORY_TOKEN } from '@/modules/users/users.interface';
 
 @injectable()
 export class UsersService {

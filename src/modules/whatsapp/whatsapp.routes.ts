@@ -1,22 +1,141 @@
 import { container } from 'tsyringe';
+import type { Request, Response } from 'express';
+import type { FastifyReply, FastifyRequest } from 'fastify';
 
-import { ModuleBuildResult, RouteDefinition } from '@/core/http/types';
+import { ModuleBuildResult, RouteDefinition, RouteResponse } from '@/core/http/types';
 import { WhatsappController } from '@/modules/whatsapp/whatsapp.controller';
+import { WhatsappSseService } from '@/modules/whatsapp/whatsapp.sse';
 import '@/modules/whatsapp/whatsapp.container';
 
 const controller = container.resolve(WhatsappController);
+const sseService = container.resolve(WhatsappSseService);
+
+function handleError(error: unknown): RouteResponse {
+  if (error instanceof Error && error.message === 'Whatsapp session not found') {
+    return {
+      status: 404,
+      body: { status: 'error', message: error.message },
+    };
+  }
+
+  return {
+    status: 500,
+    body: { status: 'error', message: 'Internal server error' },
+  };
+}
 
 const routes: RouteDefinition[] = [
   {
     method: 'GET',
-    path: '/',
+    path: '/sessions',
     handler: async () => {
-      const items = await controller.list();
+      try {
+        const items = await controller.listSessions();
+        return {
+          status: 200,
+          body: { status: 'success', data: items },
+        };
+      } catch (error) {
+        return handleError(error);
+      }
+    },
+  },
+  {
+    method: 'GET',
+    path: '/sessions/:apiKey/stream',
+    handler: async (ctx) => {
+      const apiKey = ctx.params.apiKey;
+      try {
+        const status = await controller.connectionStatus(apiKey);
+        const initial = {
+          status,
+          qr: controller.currentQr(apiKey),
+        };
 
-      return {
-        status: 200,
-        body: { status: 'success', data: items },
-      };
+        if (ctx.framework === 'express') {
+          const req = ctx.raw as Request;
+          const res = ctx.reply as Response;
+          sseService.subscribeExpress(apiKey, req, res, initial);
+        } else {
+          const request = ctx.raw as FastifyRequest;
+          const reply = ctx.reply as FastifyReply;
+          sseService.subscribeFastify(apiKey, request, reply, initial);
+        }
+
+        return { raw: true };
+      } catch (error) {
+        return handleError(error);
+      }
+    },
+  },
+  {
+    method: 'POST',
+    path: '/sessions/:apiKey/qr',
+    handler: async (ctx) => {
+      const apiKey = ctx.params.apiKey;
+      const body = (ctx.body ?? {}) as { displayName?: string };
+      const displayName =
+        typeof body.displayName === 'string' && body.displayName.trim().length > 0
+          ? body.displayName.trim()
+          : undefined;
+
+      try {
+        const qr = await controller.requestQr(apiKey, displayName);
+        return {
+          status: 200,
+          body: { status: 'success', data: qr },
+        };
+      } catch (error) {
+        return handleError(error);
+      }
+    },
+  },
+  {
+    method: 'GET',
+    path: '/sessions/:apiKey/credentials',
+    handler: async (ctx) => {
+      const apiKey = ctx.params.apiKey;
+      try {
+        const data = await controller.getCredentials(apiKey);
+        return {
+          status: 200,
+          body: { status: 'success', data },
+        };
+      } catch (error) {
+        return handleError(error);
+      }
+    },
+  },
+  {
+    method: 'POST',
+    path: '/sessions/:apiKey/logout',
+    handler: async (ctx) => {
+      const apiKey = ctx.params.apiKey;
+      try {
+        await controller.logout(apiKey);
+        return {
+          status: 200,
+          body: { status: 'success', message: 'Logged out' },
+        };
+      } catch (error) {
+        return handleError(error);
+      }
+    },
+  },
+  {
+    method: 'GET',
+    path: '/sessions/:apiKey/status',
+    handler: async (ctx) => {
+      const apiKey = ctx.params.apiKey;
+      try {
+        const status = await controller.connectionStatus(apiKey);
+        return {
+          status: 200,
+          body: { status: 'success', data: status },
+        };
+      } catch (error) {
+        return handleError(error);
+      }
     },
   },
 ];

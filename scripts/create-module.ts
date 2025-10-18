@@ -42,7 +42,7 @@ export default function create${pascal}Module(): ModuleBuildResult {
 const getControllerTemplate = (name: string, pascal: string) => `import { inject, injectable } from 'tsyringe';
 
 import { ${pascal}Service } from '@/modules/${name}/${name}.service';
-import { I${pascal} } from '@/modules/${name}/${name}.interface';
+import type { I${pascal} } from '@/modules/${name}/${name}.interface';
 
 @injectable()
 export class ${pascal}Controller {
@@ -60,11 +60,8 @@ const getServiceTemplate = (
   repositoryToken: string,
 ) => `import { inject, injectable } from 'tsyringe';
 
-import {
-  I${pascal},
-  I${pascal}Repository,
-  ${repositoryToken},
-} from '@/modules/${name}/${name}.interface';
+import type { I${pascal}, I${pascal}Repository } from '@/modules/${name}/${name}.interface';
+import { ${repositoryToken} } from '@/modules/${name}/${name}.interface';
 
 @injectable()
 export class ${pascal}Service {
@@ -95,7 +92,7 @@ const getInMemoryRepositoryTemplate = (
   pascal: string,
 ) => `import { singleton } from 'tsyringe';
 
-import { I${pascal}, I${pascal}Repository } from '@/modules/${name}/${name}.interface';
+import type { I${pascal}, I${pascal}Repository } from '@/modules/${name}/${name}.interface';
 
 const DEFAULT_${toConstantCase(name)}: I${pascal}[] = [
   { id: 1, name: 'Sample ${pascal}' },
@@ -112,7 +109,7 @@ export class ${pascal}Repository implements I${pascal}Repository {
 const getPrismaRepositoryTemplate = (name: string, pascal: string) => `import { inject, injectable } from 'tsyringe';
 
 import { PrismaService } from '@/shared/infra/database/prisma';
-import { I${pascal}, I${pascal}Repository } from '@/modules/${name}/${name}.interface';
+import type { I${pascal}, I${pascal}Repository } from '@/modules/${name}/${name}.interface';
 
 @injectable()
 export class Prisma${pascal}Repository implements I${pascal}Repository {
@@ -155,10 +152,8 @@ const getServiceSpecTemplate = (
 ) => `import 'reflect-metadata';
 import { container } from 'tsyringe';
 
-import {
-  I${pascal},
-  ${repositoryToken},
-} from '@/modules/${name}/${name}.interface';
+import type { I${pascal} } from '@/modules/${name}/${name}.interface';
+import { ${repositoryToken} } from '@/modules/${name}/${name}.interface';
 import { ${pascal}Service } from '@/modules/${name}/${name}.service';
 
 const mockRepository = {

@@ -27,6 +27,11 @@ export type RouteContext = ExpressRouteContext | FastifyRouteContext;
 export interface RouteResponse {
   status?: number;
   body?: unknown;
+  /**
+   * Set ke true bila handler sudah menangani response secara manual
+   * (misalnya untuk stream SSE).
+   */
+  raw?: boolean;
 }
 
 export type RouteHandler = (ctx: RouteContext) => Promise<RouteResponse> | RouteResponse;

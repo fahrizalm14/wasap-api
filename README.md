@@ -14,6 +14,7 @@
 - [Siklus Bootstrap](#siklus-bootstrap)
 - [Middleware & Rate Limiter](#middleware--rate-limiter)
 - [Socket Opsional](#socket-opsional)
+- [Streaming SSE](#streaming-sse)
 - [Fungsi Penting](#fungsi-penting)
 - [Penggunaan Harian](#penggunaan-harian)
   - [Pengembangan](#pengembangan)
@@ -274,6 +275,47 @@ export default function createUsersRoutes(): ModuleBuildResult {
   }
   ```
 - **Nonaktifkan** dengan membiarkan `SOCKET_ENABLED=false` (default) atau menghapus variabel tersebut. Adapter tidak akan didaftarkan sehingga modul tetap berjalan tanpa dependensi socket.
+
+---
+
+## Streaming SSE
+- Endpoint streaming tersedia di `GET /api/v1/whatsapp/sessions/{apiKey}/stream` dan mengembalikan `text/event-stream`. Endpoint ini bekerja di Express maupun Fastify tanpa konfigurasi tambahan.
+- Cara kerja singkat:
+  1. **Sesi dipicu** – Panggil `POST /api/v1/whatsapp/sessions/{apiKey}/qr`. Service memastikan socket Baileys aktif dan menyimpan QR terakhir di memori.
+  2. **Klien membuka stream** – Frontend memanggil endpoint SSE; server mengirim snapshot awal berupa status & QR saat ini (jika ada).
+  3. **Update real-time** – Event `connection.update` dari Baileys memicu `WhatsappService` untuk memperbarui status, mendistribusikan QR terbaru, atau mengirim `null` ketika QR harus disembunyikan.
+  4. **Heartbeat** – Service mengirim komentar `: keep-alive` setiap beberapa detik agar koneksi tidak ditutup oleh proxy.
+  5. **Terminasi** – Ketika logout atau koneksi ditutup, server mengirim status terakhir dan QR `null`, lalu stream berakhir saat sisi klien memanggil `close()` atau koneksi mati.
+- Alur penggunaan:
+  1. Trigger sesi seperti biasa dengan `POST /api/v1/whatsapp/sessions/{apiKey}/qr`.
+  2. Buka koneksi SSE dari dashboard/frontend untuk memantau status & QR.
+  3. Server akan mendorong event `status` (payload mengikuti `WhatsappConnectionInfo`) dan `qr` (payload `{ apiKey, qr }`, `qr` bernilai `null` saat harus disembunyikan). Heartbeat `: keep-alive` dikirim otomatis sehingga koneksi tetap hidup melalui proxy.
+- Contoh client JavaScript:
+  ```js
+  const apiKey = 'session-123';
+  const source = new EventSource(`/api/v1/whatsapp/sessions/${apiKey}/stream`);
+
+  source.addEventListener('status', (event) => {
+    const data = JSON.parse(event.data);
+    renderStatus(data.status, data.connected);
+    if (data.status === 'CONNECTED') hideQr();
+  });
+
+  source.addEventListener('qr', (event) => {
+    const { qr } = JSON.parse(event.data);
+    if (qr) {
+      drawQr(qr); // render string QR menggunakan library pilihan
+    } else {
+      hideQr();
+    }
+  });
+
+  source.onerror = () => {
+    // EventSource akan mencoba reconnect; tampilkan indikator bila perlu
+    showReconnectNotice();
+  };
+  ```
+- Tutup koneksi dengan `source.close()` ketika UI sudah tidak membutuhkan update (mis. setelah logout atau pengguna meninggalkan halaman).
 
 ---
 

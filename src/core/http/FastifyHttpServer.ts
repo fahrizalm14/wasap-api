@@ -43,6 +43,10 @@ export class FastifyHttpServer implements HttpServer {
         reply,
       });
 
+      if (result?.raw) {
+        return;
+      }
+
       const status = result?.status ?? 200;
       if (result?.body === undefined) {
         void reply.status(status).send();
