@@ -1,0 +1,36 @@
+# Dependency folders
+node_modules/
+.pnpm-store/
+
+# Build outputs
+dist/
+build/
+*.tsbuildinfo
+
+# Logs
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+log.txt
+
+# Environment variables
+.env
+.env.*
+!.env.example
+
+# OS generated
+.DS_Store
+Thumbs.db
+
+# IDE & editor settings
+.vscode/
+.idea/
+*.swp
+
+# Jest coverage and test output
+coverage/
+jest-html-reporters-*.html
+
+# Ignore production env in deploys
+deploys/
