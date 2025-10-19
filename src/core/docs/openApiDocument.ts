@@ -15,6 +15,7 @@ export const openApiDocument = {
   tags: [
     { name: 'Health', description: 'Pemeriksaan status layanan' },
     { name: 'Users', description: 'Akses data pengguna contoh' },
+    { name: 'API Keys', description: 'Manajemen API key untuk akses fitur' },
     { name: 'WhatsApp', description: 'Manajemen sesi WhatsApp' },
   ],
   paths: {
@@ -49,6 +50,118 @@ export const openApiDocument = {
                 schema: { $ref: '#/components/schemas/UsersResponse' },
               },
             },
+          },
+          500: {
+            $ref: '#/components/responses/InternalServerError',
+          },
+        },
+      },
+    },
+    '/api/v1/api-keys': {
+      get: {
+        tags: ['API Keys'],
+        summary: 'Daftar API key',
+        description: 'Mengembalikan seluruh API key yang terdaftar.',
+        parameters: [
+          {
+            name: 'x-secret-key',
+            in: 'header',
+            required: true,
+            description: 'Secret internal yang diset melalui variabel lingkungan `SECRET_KEY`.',
+            schema: { type: 'string' },
+          },
+        ],
+        responses: {
+          200: {
+            description: 'Daftar API key berhasil diambil.',
+            content: {
+              'application/json': {
+                schema: { $ref: '#/components/schemas/ApiKeysResponse' },
+              },
+            },
+          },
+          403: {
+            $ref: '#/components/responses/ForbiddenError',
+          },
+          500: {
+            $ref: '#/components/responses/InternalServerError',
+          },
+        },
+      },
+      post: {
+        tags: ['API Keys'],
+        summary: 'Generate API key',
+        description: 'Menciptakan API key baru yang dapat digunakan untuk mengakses fitur WhatsApp.',
+        parameters: [
+          {
+            name: 'x-secret-key',
+            in: 'header',
+            required: true,
+            description: 'Secret internal yang diset melalui variabel lingkungan `SECRET_KEY`.',
+            schema: { type: 'string' },
+          },
+        ],
+        requestBody: {
+          required: false,
+          content: {
+            'application/json': {
+              schema: { $ref: '#/components/schemas/CreateApiKeyPayload' },
+            },
+          },
+        },
+        responses: {
+          201: {
+            description: 'API key baru berhasil dibuat.',
+            content: {
+              'application/json': {
+                schema: { $ref: '#/components/schemas/ApiKeyResponse' },
+              },
+            },
+          },
+          403: {
+            $ref: '#/components/responses/ForbiddenError',
+          },
+          500: {
+            $ref: '#/components/responses/InternalServerError',
+          },
+        },
+      },
+    },
+    '/api/v1/api-keys/{key}': {
+      delete: {
+        tags: ['API Keys'],
+        summary: 'Menonaktifkan API key',
+        description: 'Menandai API key sebagai tidak aktif sehingga tidak dapat dipakai kembali.',
+        parameters: [
+          {
+            name: 'key',
+            in: 'path',
+            required: true,
+            description: 'API key yang akan dinonaktifkan.',
+            schema: { type: 'string' },
+          },
+          {
+            name: 'x-secret-key',
+            in: 'header',
+            required: true,
+            description: 'Secret internal yang diset melalui variabel lingkungan `SECRET_KEY`.',
+            schema: { type: 'string' },
+          },
+        ],
+        responses: {
+          200: {
+            description: 'API key berhasil dinonaktifkan.',
+            content: {
+              'application/json': {
+                schema: { $ref: '#/components/schemas/ApiKeyResponse' },
+              },
+            },
+          },
+          403: {
+            $ref: '#/components/responses/ForbiddenError',
+          },
+          404: {
+            $ref: '#/components/responses/NotFoundError',
           },
           500: {
             $ref: '#/components/responses/InternalServerError',
@@ -100,6 +213,9 @@ export const openApiDocument = {
               },
             },
           },
+          403: {
+            $ref: '#/components/responses/ForbiddenError',
+          },
           404: {
             $ref: '#/components/responses/NotFoundError',
           },
@@ -141,6 +257,9 @@ export const openApiDocument = {
               },
             },
           },
+          403: {
+            $ref: '#/components/responses/ForbiddenError',
+          },
           404: {
             $ref: '#/components/responses/NotFoundError',
           },
@@ -175,6 +294,9 @@ export const openApiDocument = {
               },
             },
           },
+          403: {
+            $ref: '#/components/responses/ForbiddenError',
+          },
           404: {
             $ref: '#/components/responses/NotFoundError',
           },
@@ -206,6 +328,9 @@ export const openApiDocument = {
                 schema: { $ref: '#/components/schemas/WhatsappLogoutResponse' },
               },
             },
+          },
+          403: {
+            $ref: '#/components/responses/ForbiddenError',
           },
           404: {
             $ref: '#/components/responses/NotFoundError',
@@ -240,6 +365,9 @@ export const openApiDocument = {
                 },
               },
             },
+          },
+          403: {
+            $ref: '#/components/responses/ForbiddenError',
           },
           404: {
             $ref: '#/components/responses/NotFoundError',
@@ -281,6 +409,47 @@ export const openApiDocument = {
           },
         },
         required: ['status', 'data'],
+      },
+      ApiKey: {
+        type: 'object',
+        properties: {
+          key: { type: 'string', example: 'wasap_5f2c8df6c0b34e4f8e2d1f9a4c6b8e12' },
+          label: { type: 'string', nullable: true, example: 'Team Support' },
+          isActive: { type: 'boolean', example: true },
+          createdAt: { type: 'string', format: 'date-time' },
+          updatedAt: { type: 'string', format: 'date-time' },
+        },
+        required: ['key', 'isActive', 'createdAt', 'updatedAt'],
+      },
+      ApiKeysResponse: {
+        type: 'object',
+        properties: {
+          status: { type: 'string', example: 'success' },
+          data: {
+            type: 'array',
+            items: { $ref: '#/components/schemas/ApiKey' },
+          },
+        },
+        required: ['status', 'data'],
+      },
+      ApiKeyResponse: {
+        type: 'object',
+        properties: {
+          status: { type: 'string', example: 'success' },
+          data: { $ref: '#/components/schemas/ApiKey' },
+        },
+        required: ['status', 'data'],
+      },
+      CreateApiKeyPayload: {
+        type: 'object',
+        properties: {
+          label: {
+            type: 'string',
+            description: 'Label opsional untuk membantu mengidentifikasi pemilik API key.',
+            example: 'Marketing Automation',
+          },
+        },
+        additionalProperties: false,
       },
       WhatsappSessionStatus: {
         type: 'string',
@@ -418,6 +587,15 @@ export const openApiDocument = {
           'application/json': {
             schema: { $ref: '#/components/schemas/ErrorResponse' },
             example: { status: 'error', message: 'Internal server error' },
+          },
+        },
+      },
+      ForbiddenError: {
+        description: 'API key tidak terdaftar atau telah dinonaktifkan.',
+        content: {
+          'application/json': {
+            schema: { $ref: '#/components/schemas/ErrorResponse' },
+            example: { status: 'error', message: 'API key not registered' },
           },
         },
       },

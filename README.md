@@ -175,6 +175,7 @@ src/
       FastifyHttpServer.ts
     middleware/      # Handler umum (error, dll)
   modules/
+    api-keys/        # Modul manajemen API key
     loadModules.ts   # Loader modul berdasarkan konfigurasi
     users/           # Contoh modul users
     whatsapp/        # Contoh modul whatsapp
@@ -204,13 +205,14 @@ Agar konsisten, setiap modul sebaiknya memuat berkas berikut:
 ## Konfigurasi Lingkungan
 Variabel utama didefinisikan di `src/config/index.ts` dan tervalidasi menggunakan Zod.
 
-| Variabel         | Default       | Deskripsi                                         |
-| ---------------- | ------------- | ------------------------------------------------- |
-| `NODE_ENV`       | development   | Lingkungan aplikasi                               |
-| `PORT`           | 3000          | Port aplikasi                                     |
-| `HTTP_SERVER`    | express       | Provider HTTP (`express`/`fastify`)               |
-| `DATABASE_URL`   | file:./dev.db | Connection string Prisma (SQLite default)         |
-| `SOCKET_ENABLED` | false         | Aktifkan integrasi Socket.IO ketika diset `true`  |
+| Variabel         | Default       | Deskripsi                                                     |
+| ---------------- | ------------- | ------------------------------------------------------------- |
+| `NODE_ENV`       | development   | Lingkungan aplikasi                                           |
+| `PORT`           | 3000          | Port aplikasi                                                 |
+| `HTTP_SERVER`    | express       | Provider HTTP (`express`/`fastify`)                           |
+| `DATABASE_URL`   | file:./dev.db | Connection string Prisma (SQLite default)                     |
+| `SOCKET_ENABLED` | false         | Aktifkan integrasi Socket.IO ketika diset `true`              |
+| `SECRET_KEY`     | -             | Secret internal untuk mengakses modul `api-keys` (wajib ada)  |
 
 Contoh `.env`:
 ```dotenv
@@ -219,6 +221,7 @@ PORT=3000
 HTTP_SERVER=fastify
 DATABASE_URL=file:./dev.db
 SOCKET_ENABLED=false
+SECRET_KEY=change-me
 ```
 
 File contoh tersedia di `.env.example`; salin ke `.env` lalu sesuaikan nilainya.
@@ -336,6 +339,19 @@ export default function createUsersRoutes(): ModuleBuildResult {
 ---
 
 ## Penggunaan Harian
+### Manajemen API Key
+- Generate kunci baru dengan `POST /api/v1/api-keys` (opsional body `{ "label": "Nama Tim" }`).
+- Sertakan header `x-secret-key` dengan nilai sesuai `SECRET_KEY` pada setiap request ke modul `api-keys`.
+- Daftar kunci aktif/nonaktif via `GET /api/v1/api-keys`.
+- Nonaktifkan kunci tertentu dengan `DELETE /api/v1/api-keys/{key}`; respons menandakan `isActive: false`.
+- Seluruh endpoint WhatsApp (QR, status, kredensial, SSE) **wajib** menggunakan API key yang masih aktif; permintaan dengan key tidak terdaftar akan ditolak dengan status `403`.
+- Contoh cURL generate key:
+  ```bash
+  curl -X POST http://localhost:3025/api/v1/api-keys \\
+    -H 'Content-Type: application/json' \\
+    -d '{ "label": "Marketing Bot" }'
+  ```
+
 ### Pengembangan
 ```bash
 pnpm dev

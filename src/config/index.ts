@@ -10,6 +10,7 @@ const envSchema = z.object({
   HTTP_SERVER: z.enum(['express', 'fastify']).default('express'),
   DATABASE_URL: z.string().min(1).default('file:./dev.db'),
   SOCKET_ENABLED: z.coerce.boolean().default(false),
+  SECRET_KEY: z.string().min(1, 'SECRET_KEY must not be empty'),
 });
 
 const parsedEnv = envSchema.safeParse(process.env);

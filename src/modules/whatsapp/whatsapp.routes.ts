@@ -3,6 +3,7 @@ import type { Request, Response } from 'express';
 import type { FastifyReply, FastifyRequest } from 'fastify';
 
 import { ModuleBuildResult, RouteDefinition, RouteResponse } from '@/core/http/types';
+import '@/modules/api-keys/api-keys.container';
 import { WhatsappController } from '@/modules/whatsapp/whatsapp.controller';
 import { WhatsappSseService } from '@/modules/whatsapp/whatsapp.sse';
 import '@/modules/whatsapp/whatsapp.container';
@@ -14,6 +15,13 @@ function handleError(error: unknown): RouteResponse {
   if (error instanceof Error && error.message === 'Whatsapp session not found') {
     return {
       status: 404,
+      body: { status: 'error', message: error.message },
+    };
+  }
+
+  if (error instanceof Error && error.message === 'API key not registered') {
+    return {
+      status: 403,
       body: { status: 'error', message: error.message },
     };
   }

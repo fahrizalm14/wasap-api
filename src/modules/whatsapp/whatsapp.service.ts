@@ -9,8 +9,9 @@ import makeWASocket, {
   initAuthCreds,
 } from 'baileys';
 
-import { Logger } from '@/shared/utils/logger';
 import { env } from '@/config';
+import { ApiKeysService } from '@/modules/api-keys/api-keys.service';
+import { Logger } from '@/shared/utils/logger';
 import type {
   IWhatsappRepository,
   StoredWhatsappCredentials,
@@ -60,6 +61,7 @@ export class WhatsappService {
     @inject(WHATSAPP_REPOSITORY_TOKEN)
     private readonly repository: IWhatsappRepository,
     @inject(Logger) private readonly logger: Logger,
+    @inject(ApiKeysService) private readonly apiKeysService: ApiKeysService,
     /**
      * Kanal distribusi SSE untuk mengirim status & QR secara real-time.
      */
@@ -77,7 +79,8 @@ export class WhatsappService {
    * Mengambil seluruh kredensial + key store untuk sesi tertentu.
    */
   async getCredentials(apiKey: string): Promise<StoredWhatsappCredentials> {
-    const session = await this.repository.findSessionByApiKey(apiKey);
+    const normalizedKey = await this.ensureActiveKey(apiKey);
+    const session = await this.repository.findSessionByApiKey(normalizedKey);
     if (!session) {
       throw new Error('Whatsapp session not found');
     }
@@ -90,31 +93,33 @@ export class WhatsappService {
    * dan mengembalikan QR atau status terkini.
    */
   async getQr(apiKey: string, displayName?: string): Promise<WhatsappQrResult> {
-    const session = await this.repository.ensureSession(apiKey, displayName);
+    const normalizedKey = await this.ensureActiveKey(apiKey);
+    const session = await this.repository.ensureSession(normalizedKey, displayName);
     const state = await this.initializeSocket(session);
 
     if (state.status === 'CONNECTED') {
-      return { apiKey, status: 'CONNECTED' };
+      return { apiKey: normalizedKey, status: 'CONNECTED' };
     }
 
     if (state.qr) {
-      return { apiKey, status: 'QR', qr: state.qr };
+      return { apiKey: normalizedKey, status: 'QR', qr: state.qr };
     }
 
     const qr = await this.waitForQr(state);
-    return { apiKey, status: 'QR', qr };
+    return { apiKey: normalizedKey, status: 'QR', qr };
   }
 
   /**
    * Memutus sesi di sisi Baileys, membersihkan data lokal, dan memberi tahu subscriber.
    */
   async logout(apiKey: string): Promise<void> {
-    const session = await this.repository.findSessionByApiKey(apiKey);
+    const normalizedKey = await this.ensureActiveKey(apiKey);
+    const session = await this.repository.findSessionByApiKey(normalizedKey);
     if (!session) {
       throw new Error('Whatsapp session not found');
     }
 
-    const state = this.sessions.get(apiKey);
+    const state = this.sessions.get(normalizedKey);
     if (state?.socket) {
       try {
         await state.socket.logout();
@@ -131,7 +136,7 @@ export class WhatsappService {
     await this.repository.clearSessionData(session.id);
     await this.repository.updateStatus(session.id, 'LOGGED_OUT');
 
-    this.emitQrUpdate(apiKey, null);
+    this.emitQrUpdate(normalizedKey, null);
 
     if (state) {
       state.socket = undefined;
@@ -139,9 +144,9 @@ export class WhatsappService {
       state.status = 'LOGGED_OUT';
       state.qrWaiters = [];
       this.emitStatusUpdate(state);
-      this.sessions.delete(apiKey);
+      this.sessions.delete(normalizedKey);
     } else {
-      this.emitStatus(apiKey, 'LOGGED_OUT', false);
+      this.emitStatus(normalizedKey, 'LOGGED_OUT', false);
     }
   }
 
@@ -149,17 +154,18 @@ export class WhatsappService {
    * Membaca status koneksi terkini (menggabungkan state memori + database).
    */
   async getConnectionStatus(apiKey: string): Promise<WhatsappConnectionInfo> {
-    const session = await this.repository.findSessionByApiKey(apiKey);
+    const normalizedKey = await this.ensureActiveKey(apiKey);
+    const session = await this.repository.findSessionByApiKey(normalizedKey);
     if (!session) {
       throw new Error('Whatsapp session not found');
     }
 
-    const state = this.sessions.get(apiKey);
+    const state = this.sessions.get(normalizedKey);
     const connected = Boolean(state?.socket?.user);
     const status = connected ? 'CONNECTED' : state?.status ?? session.status;
 
     return {
-      apiKey,
+      apiKey: normalizedKey,
       status,
       connected,
     };
@@ -170,7 +176,8 @@ export class WhatsappService {
    * Digunakan oleh endpoint SSE untuk mengirim snapshot awal.
    */
   getCurrentQr(apiKey: string): string | null {
-    const state = this.sessions.get(apiKey);
+    const normalized = apiKey.trim();
+    const state = this.sessions.get(normalized);
     return state?.qr ?? null;
   }
 
@@ -194,6 +201,11 @@ export class WhatsappService {
    */
   private emitStatus(apiKey: string, status: WhatsappSessionStatus, connected: boolean): void {
     this.sseService.publishStatus({ apiKey, status, connected });
+  }
+
+  private async ensureActiveKey(apiKey: string): Promise<string> {
+    const record = await this.apiKeysService.assertActive(apiKey);
+    return record.key;
   }
 
   /**

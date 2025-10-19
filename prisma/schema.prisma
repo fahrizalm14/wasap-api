@@ -15,6 +15,16 @@ model User {
   updatedAt DateTime @updatedAt
 }
 
+model ApiKey {
+  key       String   @id
+  label     String?
+  isActive  Boolean  @default(true)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  sessions  WhatsappSession[]
+}
+
 enum WhatsappSessionStatus {
   CONNECTED
   DISCONNECTED
@@ -26,6 +36,7 @@ enum WhatsappSessionStatus {
 model WhatsappSession {
   id          Int                    @id @default(autoincrement())
   apiKey      String                 @unique
+  apiKeyOwner ApiKey                 @relation(fields: [apiKey], references: [key], onDelete: Restrict)
   displayName String?
   status      WhatsappSessionStatus  @default(DISCONNECTED)
   creds       Json?

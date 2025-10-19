@@ -30,12 +30,14 @@ jest.mock('baileys', () => ({
   DisconnectReason: { loggedOut: 401 },
 }));
 
-import { WhatsappService } from '@/modules/whatsapp/whatsapp.service';
+import { ApiKey } from '@/modules/api-keys/api-keys.interface';
+import { ApiKeysService } from '@/modules/api-keys/api-keys.service';
 import {
   StoredWhatsappCredentials,
   WhatsappSession,
   WHATSAPP_REPOSITORY_TOKEN,
 } from '@/modules/whatsapp/whatsapp.interface';
+import { WhatsappService } from '@/modules/whatsapp/whatsapp.service';
 import { Logger } from '@/shared/utils/logger';
 import { WhatsappSseService } from '@/modules/whatsapp/whatsapp.sse';
 
@@ -65,15 +67,29 @@ describe('WhatsappService', () => {
     subscribeFastify: jest.fn(),
   } as unknown as WhatsappSseService;
 
+  let assertActiveMock: jest.Mock;
+  let apiKeysServiceMock: ApiKeysService;
   let service: WhatsappService;
 
   beforeEach(() => {
     jest.clearAllMocks();
     container.clearInstances();
+    const activeKey: ApiKey = {
+      key: 'wasap_active',
+      label: null,
+      isActive: true,
+      createdAt: new Date(),
+      updatedAt: new Date(),
+    };
+    assertActiveMock = jest.fn().mockResolvedValue(activeKey);
+    apiKeysServiceMock = {
+      assertActive: assertActiveMock,
+    } as unknown as ApiKeysService;
     container.register(Logger, { useValue: loggerMock });
     container.register(WHATSAPP_REPOSITORY_TOKEN, {
       useValue: repositoryMock,
     });
+    container.register(ApiKeysService, { useValue: apiKeysServiceMock });
     container.register(WhatsappSseService, { useValue: sseMock });
     service = container.resolve(WhatsappService);
   });
