@@ -14,6 +14,11 @@ import {
   WhatsappSessionStatus,
 } from '@/modules/whatsapp/whatsapp.interface';
 import { PrismaService } from '@/shared/infra/database/prisma';
+import {
+  decryptJson,
+  encryptJson,
+  isEncryptedPayload,
+} from './waCrypto';
 
 @injectable()
 export class PrismaWhatsappRepository implements IWhatsappRepository {
@@ -79,17 +84,31 @@ export class PrismaWhatsappRepository implements IWhatsappRepository {
       return null;
     }
 
-    return this.fromJsonValue<AuthenticationCreds>(session.creds);
+    // Support both plaintext JSON and encrypted payload (for backward compatibility)
+    const raw = this.fromJsonValue<unknown>(session.creds);
+    if (raw && isEncryptedPayload(raw)) {
+      const apiKey = await this.getApiKeyBySessionId(sessionId);
+      const decrypted = decryptJson(raw, { apiKey });
+      // Important: revive Buffers for Baileys using BufferJSON.reviver
+      return JSON.parse(
+        JSON.stringify(decrypted),
+        BufferJSON.reviver,
+      ) as AuthenticationCreds;
+    }
+    // If not encrypted, it already passed through fromJsonValue which revives buffers
+    return raw as AuthenticationCreds | null;
   }
 
   async saveCreds(
     sessionId: number,
     creds: AuthenticationCreds,
   ): Promise<void> {
+    const apiKey = await this.getApiKeyBySessionId(sessionId);
+    const payload = encryptJson(creds, { apiKey, kver: 1 });
     await this.prisma.whatsappSession.update({
       where: { id: sessionId },
       data: {
-        creds: this.toJsonValue(creds),
+        creds: this.toJsonValue(payload),
       },
     });
   }
@@ -116,8 +135,15 @@ export class PrismaWhatsappRepository implements IWhatsappRepository {
       result[id] = null;
     });
 
+    const apiKey = await this.getApiKeyBySessionId(sessionId);
     for (const record of records) {
-      const value = this.fromJsonValue<SignalDataTypeMap[K]>(record.value);
+      const parsed = this.fromJsonValue<unknown>(record.value);
+      const value = (parsed && isEncryptedPayload(parsed)
+        ? (JSON.parse(
+            JSON.stringify(decryptJson(parsed, { apiKey })),
+            BufferJSON.reviver,
+          ) as SignalDataTypeMap[K])
+        : (parsed as SignalDataTypeMap[K] | null));
       if (value && type === 'app-state-sync-key') {
         const appStateKey = proto.Message.AppStateSyncKeyData.fromObject(
           value as proto.Message.IAppStateSyncKeyData,
@@ -156,7 +182,10 @@ export class PrismaWhatsappRepository implements IWhatsappRepository {
             category as string,
             value,
           );
-          const storedValue = this.toJsonValue(normalized);
+          const apiKey = await this.getApiKeyBySessionId(sessionId);
+          const storedValue = this.toJsonValue(
+            encryptJson(normalized, { apiKey, kver: 1 }),
+          );
 
           tasks.push(
             this.prisma.whatsappCredential.upsert({
@@ -280,6 +309,17 @@ export class PrismaWhatsappRepository implements IWhatsappRepository {
       createdAt: session.createdAt,
       updatedAt: session.updatedAt,
     };
+  }
+
+  private async getApiKeyBySessionId(sessionId: number): Promise<string> {
+    const row = await this.prisma.whatsappSession.findUnique({
+      where: { id: sessionId },
+      select: { apiKey: true },
+    });
+    if (!row) {
+      throw new Error('Whatsapp session not found');
+    }
+    return row.apiKey;
   }
 
   private toJsonValue(value: unknown): Prisma.InputJsonValue {

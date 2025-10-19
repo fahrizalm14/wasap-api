@@ -1,18 +1,25 @@
-import { container } from 'tsyringe';
 import type { Request, Response } from 'express';
 import type { FastifyReply, FastifyRequest } from 'fastify';
+import { container } from 'tsyringe';
 
-import { ModuleBuildResult, RouteDefinition, RouteResponse } from '@/core/http/types';
+import {
+  ModuleBuildResult,
+  RouteDefinition,
+  RouteResponse,
+} from '@/core/http/types';
 import '@/modules/api-keys/api-keys.container';
+import '@/modules/whatsapp/whatsapp.container';
 import { WhatsappController } from '@/modules/whatsapp/whatsapp.controller';
 import { WhatsappSseService } from '@/modules/whatsapp/whatsapp.sse';
-import '@/modules/whatsapp/whatsapp.container';
 
 const controller = container.resolve(WhatsappController);
 const sseService = container.resolve(WhatsappSseService);
 
 function handleError(error: unknown): RouteResponse {
-  if (error instanceof Error && error.message === 'Whatsapp session not found') {
+  if (
+    error instanceof Error &&
+    error.message === 'Whatsapp session not found'
+  ) {
     return {
       status: 404,
       body: { status: 'error', message: error.message },
@@ -83,7 +90,8 @@ const routes: RouteDefinition[] = [
       const apiKey = ctx.params.apiKey;
       const body = (ctx.body ?? {}) as { displayName?: string };
       const displayName =
-        typeof body.displayName === 'string' && body.displayName.trim().length > 0
+        typeof body.displayName === 'string' &&
+        body.displayName.trim().length > 0
           ? body.displayName.trim()
           : undefined;
 
@@ -98,22 +106,22 @@ const routes: RouteDefinition[] = [
       }
     },
   },
-  {
-    method: 'GET',
-    path: '/sessions/:apiKey/credentials',
-    handler: async (ctx) => {
-      const apiKey = ctx.params.apiKey;
-      try {
-        const data = await controller.getCredentials(apiKey);
-        return {
-          status: 200,
-          body: { status: 'success', data },
-        };
-      } catch (error) {
-        return handleError(error);
-      }
-    },
-  },
+  // {
+  //   method: 'GET',
+  //   path: '/sessions/:apiKey/credentials',
+  //   handler: async (ctx) => {
+  //     const apiKey = ctx.params.apiKey;
+  //     try {
+  //       const data = await controller.getCredentials(apiKey);
+  //       return {
+  //         status: 200,
+  //         body: { status: 'success', data },
+  //       };
+  //     } catch (error) {
+  //       return handleError(error);
+  //     }
+  //   },
+  // },
   {
     method: 'POST',
     path: '/sessions/:apiKey/logout',

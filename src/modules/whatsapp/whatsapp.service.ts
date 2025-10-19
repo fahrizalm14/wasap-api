@@ -52,17 +52,6 @@ export class WhatsappService {
 
   private baileysVersion?: Promise<[number, number, number]>;
 
-  /**
-   * Identitas browser yang dikirimkan ke WhatsApp.
-   * Gunakan nilai yang menyerupai browser sungguhan agar tidak dianggap mencurigakan.
-   * Referensi: https://baileys.wiki/docs/socket/connecting
-   */
-  private readonly browser: [string, string, string] = [
-    'Chrome (macOS)',
-    'Chrome',
-    '120.0.6099.225',
-  ];
-
   private readonly qrTimeoutMs = 60_000;
 
   private readonly isDevelopment = env.NODE_ENV !== 'production';
