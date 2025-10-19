@@ -4,7 +4,7 @@ import {
   BufferJSON,
   SignalDataTypeMap,
   proto,
-} from 'baileys';
+} from '@whiskeysockets/baileys';
 import { inject, injectable } from 'tsyringe';
 
 import {

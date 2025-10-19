@@ -3,6 +3,8 @@ import { inject, injectable } from 'tsyringe';
 
 import {
   API_KEYS_REPOSITORY_TOKEN,
+} from '@/modules/api-keys/api-keys.interface';
+import type {
   ApiKey,
   IApiKeysRepository,
 } from '@/modules/api-keys/api-keys.interface';

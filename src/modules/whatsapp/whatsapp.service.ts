@@ -1,17 +1,17 @@
-import { inject, singleton } from 'tsyringe';
-import pino from 'pino';
 import makeWASocket, {
+  Browsers,
   ConnectionState,
   DisconnectReason,
   SignalDataTypeMap,
   WASocket,
   fetchLatestBaileysVersion,
   initAuthCreds,
-} from 'baileys';
+} from '@whiskeysockets/baileys';
+import pino from 'pino';
+import { inject, singleton } from 'tsyringe';
 
 import { env } from '@/config';
 import { ApiKeysService } from '@/modules/api-keys/api-keys.service';
-import { Logger } from '@/shared/utils/logger';
 import type {
   IWhatsappRepository,
   StoredWhatsappCredentials,
@@ -22,6 +22,7 @@ import type {
 } from '@/modules/whatsapp/whatsapp.interface';
 import { WHATSAPP_REPOSITORY_TOKEN } from '@/modules/whatsapp/whatsapp.interface';
 import { WhatsappSseService } from '@/modules/whatsapp/whatsapp.sse';
+import { Logger } from '@/shared/utils/logger';
 
 interface QrWaiter {
   resolve: (qr: string) => void;
@@ -51,7 +52,16 @@ export class WhatsappService {
 
   private baileysVersion?: Promise<[number, number, number]>;
 
-  private readonly browser: [string, string, string] = ['Wasap API', 'Chrome', '1.0.0'];
+  /**
+   * Identitas browser yang dikirimkan ke WhatsApp.
+   * Gunakan nilai yang menyerupai browser sungguhan agar tidak dianggap mencurigakan.
+   * Referensi: https://baileys.wiki/docs/socket/connecting
+   */
+  private readonly browser: [string, string, string] = [
+    'Chrome (macOS)',
+    'Chrome',
+    '120.0.6099.225',
+  ];
 
   private readonly qrTimeoutMs = 60_000;
 
@@ -67,6 +77,27 @@ export class WhatsappService {
      */
     @inject(WhatsappSseService) private readonly sseService: WhatsappSseService,
   ) {}
+
+  /**
+   * Cache sederhana untuk penghitung retry pesan (memenuhi kontrak CacheStore Baileys).
+   */
+  private readonly msgRetryCounterCache = (() => {
+    const map = new Map<string, unknown>();
+    return {
+      get<T>(key: string): T | undefined {
+        return map.get(key) as T | undefined;
+      },
+      set<T>(key: string, value: T): void {
+        map.set(key, value as unknown);
+      },
+      del(key: string): void {
+        map.delete(key);
+      },
+      flushAll(): void {
+        map.clear();
+      },
+    };
+  })();
 
   /**
    * Mengembalikan daftar seluruh sesi yang tersimpan di database.
@@ -94,7 +125,10 @@ export class WhatsappService {
    */
   async getQr(apiKey: string, displayName?: string): Promise<WhatsappQrResult> {
     const normalizedKey = await this.ensureActiveKey(apiKey);
-    const session = await this.repository.ensureSession(normalizedKey, displayName);
+    const session = await this.repository.ensureSession(
+      normalizedKey,
+      displayName,
+    );
     const state = await this.initializeSocket(session);
 
     if (state.status === 'CONNECTED') {
@@ -162,7 +196,7 @@ export class WhatsappService {
 
     const state = this.sessions.get(normalizedKey);
     const connected = Boolean(state?.socket?.user);
-    const status = connected ? 'CONNECTED' : state?.status ?? session.status;
+    const status = connected ? 'CONNECTED' : (state?.status ?? session.status);
 
     return {
       apiKey: normalizedKey,
@@ -199,7 +233,11 @@ export class WhatsappService {
   /**
    * Mengirimkan update status ke seluruh subscriber SSE untuk `apiKey`.
    */
-  private emitStatus(apiKey: string, status: WhatsappSessionStatus, connected: boolean): void {
+  private emitStatus(
+    apiKey: string,
+    status: WhatsappSessionStatus,
+    connected: boolean,
+  ): void {
     this.sseService.publishStatus({ apiKey, status, connected });
   }
 
@@ -212,7 +250,11 @@ export class WhatsappService {
    * Helper untuk mengirim status berdasarkan state internal sesi.
    */
   private emitStatusUpdate(state: ManagedSession): void {
-    this.emitStatus(state.info.apiKey, state.status, Boolean(state.socket?.user));
+    this.emitStatus(
+      state.info.apiKey,
+      state.status,
+      Boolean(state.socket?.user),
+    );
   }
 
   /**
@@ -246,10 +288,14 @@ export class WhatsappService {
   }
 
   private removeQrWaiter(state: ManagedSession, waiter: QrWaiter) {
-    state.qrWaiters = state.qrWaiters.filter((candidate) => candidate !== waiter);
+    state.qrWaiters = state.qrWaiters.filter(
+      (candidate) => candidate !== waiter,
+    );
   }
 
-  private async initializeSocket(session: WhatsappSession): Promise<ManagedSession> {
+  private async initializeSocket(
+    session: WhatsappSession,
+  ): Promise<ManagedSession> {
     let state = this.sessions.get(session.apiKey);
 
     if (!state) {
@@ -284,14 +330,33 @@ export class WhatsappService {
 
   private async createSocket(state: ManagedSession): Promise<WASocket> {
     try {
-      const { state: authState, saveCreds } = await this.buildAuthState(state.info.id);
+      const { state: authState, saveCreds } = await this.buildAuthState(
+        state.info.id,
+      );
+      // Gunakan versi Web WA yang sesuai dengan Baileys (menghindari ketidakcocokan versi)
       const version = await this.resolveBaileysVersion();
       const socket = makeWASocket({
         auth: authState,
         version,
+
         printQRInTerminal: false,
-        browser: this.browser,
+        // Gunakan preset browser dari Baileys agar terlihat natural
+        browser: Browsers.macOS('Firefox'),
         logger: this.socketLogger,
+        /**
+         * Konfigurasi tambahan mengikuti dokumentasi resmi Baileys:
+         * https://baileys.wiki/docs/socket/connecting
+         */
+        markOnlineOnConnect: true,
+        syncFullHistory: false,
+        generateHighQualityLinkPreview: true,
+        connectTimeoutMs: 60_000,
+        keepAliveIntervalMs: 30_000,
+        defaultQueryTimeoutMs: undefined,
+        emitOwnEvents: true,
+        msgRetryCounterCache: this.msgRetryCounterCache,
+        // Implementasi getMessage minimal; sesuaikan jika menyimpan history lokal
+        getMessage: async () => undefined,
       });
 
       state.socket = socket;
@@ -306,7 +371,9 @@ export class WhatsappService {
 
       socket.ev.on('connection.update', (update) => {
         const statusCode = (
-          update.lastDisconnect?.error as { output?: { statusCode?: number } } | undefined
+          update.lastDisconnect?.error as
+            | { output?: { statusCode?: number } }
+            | undefined
         )?.output?.statusCode;
         this.devLog(
           `[Baileys] connection.update session=${state.info.apiKey} connection=${
@@ -339,13 +406,19 @@ export class WhatsappService {
       state: {
         creds,
         keys: {
-          get: async <K extends keyof SignalDataTypeMap>(type: K, ids: string[]) =>
-            (this.repository.loadKeys(sessionId, type, ids) as Promise<
+          get: async <K extends keyof SignalDataTypeMap>(
+            type: K,
+            ids: string[],
+          ) =>
+            this.repository.loadKeys(sessionId, type, ids) as Promise<
               Record<string, SignalDataTypeMap[K]>
-            >),
+            >,
           set: async (
             data: Partial<{
-              [K in keyof SignalDataTypeMap]: Record<string, SignalDataTypeMap[K] | null>;
+              [K in keyof SignalDataTypeMap]: Record<
+                string,
+                SignalDataTypeMap[K] | null
+              >;
             }>,
           ) => {
             await this.repository.setKeys({ sessionId, values: data });
@@ -363,8 +436,11 @@ export class WhatsappService {
       this.baileysVersion = fetchLatestBaileysVersion()
         .then(({ version }) => version)
         .catch((error) => {
-          this.logger.error('Failed to fetch latest Baileys version, fallback to default', error);
-          return [2, 3000, 0];
+          this.logger.error(
+            'Failed to fetch latest Baileys version, fallback to default',
+            error,
+          );
+          return [2, 3000, 1013973370];
         });
     }
 
@@ -398,8 +474,11 @@ export class WhatsappService {
     }
 
     if (connection === 'close') {
-      const statusCode = (lastDisconnect?.error as { output?: { statusCode?: number } } | undefined)?.output
-        ?.statusCode;
+      const statusCode = (
+        lastDisconnect?.error as
+          | { output?: { statusCode?: number } }
+          | undefined
+      )?.output?.statusCode;
       const loggedOut = statusCode === DisconnectReason.loggedOut;
 
       this.devLog(
@@ -412,12 +491,30 @@ export class WhatsappService {
       this.emitQrUpdate(state.info.apiKey, null);
 
       if (loggedOut) {
-        this.devLog(`[Baileys] session logged out session=${state.info.apiKey}`);
+        this.devLog(
+          `[Baileys] session logged out session=${state.info.apiKey}`,
+        );
         await this.repository.clearSessionData(state.info.id);
         await this.updateSessionStatus(state, 'LOGGED_OUT');
         this.sessions.delete(state.info.apiKey);
       } else {
         await this.updateSessionStatus(state, 'DISCONNECTED');
+        // Coba reconnect otomatis untuk kasus selain loggedOut
+        setTimeout(() => {
+          if (!state.connectPromise && !state.socket?.user) {
+            this.devLog(
+              `[Baileys] attempting reconnect session=${state.info.apiKey}`,
+            );
+            state.connectPromise = this.createSocket(state)
+              .catch((err) => {
+                this.logger.error('Failed to reconnect WhatsApp socket', err);
+                throw err;
+              })
+              .finally(() => {
+                state.connectPromise = undefined;
+              });
+          }
+        }, 1000);
       }
 
       state.socket = undefined;
@@ -425,7 +522,10 @@ export class WhatsappService {
     }
   }
 
-  private async updateSessionStatus(state: ManagedSession, status: WhatsappSessionStatus): Promise<void> {
+  private async updateSessionStatus(
+    state: ManagedSession,
+    status: WhatsappSessionStatus,
+  ): Promise<void> {
     state.status = status;
     try {
       await this.repository.updateStatus(state.info.id, status);

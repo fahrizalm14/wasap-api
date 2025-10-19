@@ -1,4 +1,4 @@
-import { AuthenticationCreds, SignalDataTypeMap } from 'baileys';
+import { AuthenticationCreds, SignalDataTypeMap } from '@whiskeysockets/baileys';
 
 export type WhatsappSessionStatus =
   | 'CONNECTED'

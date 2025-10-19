@@ -29,7 +29,7 @@
     "@prisma/client": "^6.17.1",
     "@swc/core": "^1.13.5",
     "@swc/helpers": "^0.5.17",
-    "baileys": "^6.7.20",
+    "@whiskeysockets/baileys": "^6.7.20",
     "cors": "^2.8.5",
     "dotenv": "^17.2.1",
     "express": "^5.1.0",

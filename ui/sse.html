@@ -1,0 +1,330 @@
+<!DOCTYPE html>
+<html lang="id">
+  <head>
+    <meta charset="UTF-8" />
+    <title>Uji Coba SSE WhatsApp</title>
+    <style>
+      :root {
+        color-scheme: light dark;
+        font-family: system-ui, sans-serif;
+      }
+      body {
+        margin: 0;
+        padding: 1.5rem;
+        display: flex;
+        flex-direction: column;
+        gap: 1rem;
+        background: #f5f6fa;
+      }
+      header {
+        display: flex;
+        flex-direction: column;
+        gap: 0.25rem;
+      }
+      main {
+        display: grid;
+        gap: 1rem;
+        grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+      }
+      section {
+        background: #fff;
+        border-radius: 12px;
+        padding: 1rem;
+        box-shadow: 0 10px 32px rgba(31, 38, 135, 0.1);
+      }
+      label {
+        display: block;
+        font-weight: 600;
+        margin-bottom: 0.5rem;
+      }
+      input[type='text'],
+      input[type='url'] {
+        width: 100%;
+        padding: 0.6rem 0.8rem;
+        border: 1px solid #d1d5db;
+        border-radius: 8px;
+        font-size: 0.95rem;
+        transition: border-color 0.2s ease, box-shadow 0.2s ease;
+      }
+      input[type='text']:focus,
+      input[type='url']:focus {
+        border-color: #2563eb;
+        box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.15);
+        outline: none;
+      }
+      button {
+        border: none;
+        padding: 0.65rem 1.2rem;
+        border-radius: 8px;
+        font-weight: 600;
+        cursor: pointer;
+        transition: transform 0.1s ease, box-shadow 0.2s ease;
+      }
+      button.primary {
+        background: linear-gradient(135deg, #2563eb, #1d4ed8);
+        color: #fff;
+        box-shadow: 0 8px 20px rgba(37, 99, 235, 0.35);
+      }
+      button.secondary {
+        background: #f3f4f6;
+        color: #111827;
+      }
+      button:active {
+        transform: scale(0.98);
+      }
+      .status-chip {
+        display: inline-flex;
+        align-items: center;
+        gap: 0.35rem;
+        font-size: 0.85rem;
+        padding: 0.3rem 0.7rem;
+        border-radius: 999px;
+        font-weight: 600;
+      }
+      .status-chip.connected {
+        background: rgba(34, 197, 94, 0.1);
+        color: #15803d;
+      }
+      .status-chip.disconnected {
+        background: rgba(239, 68, 68, 0.1);
+        color: #b91c1c;
+      }
+      .status-chip.pending {
+        background: rgba(250, 204, 21, 0.15);
+        color: #b45309;
+      }
+      pre {
+        background: #0f172a;
+        color: #e2e8f0;
+        padding: 0.75rem;
+        border-radius: 8px;
+        overflow: auto;
+        max-height: 260px;
+        font-size: 0.85rem;
+        line-height: 1.4;
+      }
+      .qr-container {
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        background: #0f172a;
+        border-radius: 12px;
+        padding: 1rem;
+        min-height: 240px;
+      }
+      .qr-container img {
+        max-width: 100%;
+        height: auto;
+      }
+      .log-header {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+      }
+      footer {
+        margin-top: 2rem;
+        font-size: 0.85rem;
+        color: #6b7280;
+        text-align: center;
+      }
+    </style>
+  </head>
+  <body>
+    <header>
+      <h1>Streaming SSE WhatsApp</h1>
+      <p>
+        Masukkan URL endpoint SSE (misal
+        <code>http://localhost:3025/api/v1/whatsapp/sessions/{apiKey}/stream</code>
+        ) lalu tekan <strong>Mulai</strong>. UI ini membantu memverifikasi CORS dan aliran event.
+      </p>
+    </header>
+
+    <main>
+      <section>
+        <label for="endpoint">Endpoint SSE</label>
+        <input
+          type="url"
+          id="endpoint"
+          placeholder="http://localhost:3025/api/v1/whatsapp/sessions/your-key/stream"
+        />
+
+        <label style="display: inline-flex; align-items: center; gap: 0.6rem; margin-top: 1rem">
+          <input type="checkbox" id="credentials-checkbox" />
+          Kirim kredensial (cookie) saat streaming (aktifkan jika backend membutuhkan sesi/login)
+        </label>
+
+        <div style="display: flex; gap: 0.5rem; margin-top: 1.25rem">
+          <button class="primary" id="start-btn">Mulai Stream</button>
+          <button class="secondary" id="stop-btn">Stop Stream</button>
+        </div>
+
+        <p style="margin-top: 1.25rem">
+          Status koneksi:
+          <span id="status-chip" class="status-chip pending">Menunggu...</span>
+        </p>
+      </section>
+
+      <section>
+        <div class="qr-container">
+          <img id="qr-image" alt="QR akan tampil di sini" hidden />
+          <span id="qr-placeholder">QR belum tersedia.</span>
+        </div>
+      </section>
+
+      <section>
+        <div class="log-header">
+          <h3>Log Status & Event</h3>
+          <button class="secondary" id="clear-log-btn">Bersihkan Log</button>
+        </div>
+        <pre id="log-output">[log] belum ada data</pre>
+      </section>
+    </main>
+
+    <footer>
+      Dibuat untuk pengujian SSE WhatsApp. Pastikan backend berjalan dan CORS pada SSE sudah
+      diizinkan.
+    </footer>
+
+    <script>
+      const endpointInput = document.getElementById('endpoint');
+      const startBtn = document.getElementById('start-btn');
+      const stopBtn = document.getElementById('stop-btn');
+      const statusChip = document.getElementById('status-chip');
+      const logOutput = document.getElementById('log-output');
+      const clearLogBtn = document.getElementById('clear-log-btn');
+      const qrImage = document.getElementById('qr-image');
+      const qrPlaceholder = document.getElementById('qr-placeholder');
+      const credentialsCheckbox = document.getElementById('credentials-checkbox');
+
+      let eventSource = null;
+      let qrSession = null;
+
+      function updateStatus(state, message) {
+        statusChip.className = 'status-chip ' + state;
+        statusChip.textContent = message;
+      }
+
+      function appendLog(type, payload) {
+        const text = typeof payload === 'string' ? payload : JSON.stringify(payload, null, 2);
+        const current = logOutput.textContent === '[log] belum ada data' ? '' : logOutput.textContent + '\n';
+        logOutput.textContent = `${current}[${new Date().toLocaleTimeString()}][${type}] ${text}`.trim();
+      }
+
+      function showQr(dataUrl) {
+        if (dataUrl) {
+          qrImage.src = dataUrl.startsWith('data:') ? dataUrl : `data:image/png;base64,${dataUrl}`;
+          qrImage.hidden = false;
+          qrPlaceholder.hidden = true;
+        } else {
+          qrImage.hidden = true;
+          qrPlaceholder.hidden = false;
+        }
+      }
+
+      function startStream() {
+        const url = endpointInput.value.trim();
+        if (!url) {
+          alert('Masukkan URL endpoint SSE terlebih dahulu.');
+          return;
+        }
+
+        if (eventSource) {
+          eventSource.close();
+          eventSource = null;
+        }
+
+        const useCredentials = credentialsCheckbox.checked;
+        qrSession = url;
+
+        try {
+          eventSource = new EventSource(url, { withCredentials: useCredentials });
+        } catch (error) {
+          appendLog('error', error.message || error);
+          updateStatus('disconnected', 'Gagal membuat koneksi');
+          return;
+        }
+
+        updateStatus('pending', 'Menghubungkan...');
+
+        eventSource.onopen = () => {
+          appendLog('info', 'Koneksi terbuka');
+          updateStatus('connected', 'Terhubung');
+        };
+
+        eventSource.onerror = (event) => {
+          if (!eventSource) {
+            return;
+          }
+
+          if (eventSource.readyState === EventSource.CONNECTING) {
+            appendLog('info', 'Koneksi terputus, mencoba menyambung ulang...');
+            updateStatus('pending', 'Reconnecting...');
+            return;
+          }
+
+          appendLog(
+            'error',
+            event && event.message ? event.message : 'Terjadi kesalahan atau koneksi terputus permanen',
+          );
+          updateStatus('disconnected', 'Terputus');
+
+          if (eventSource.readyState === EventSource.CLOSED) {
+            appendLog('info', 'Server menutup koneksi. Tekan "Mulai Stream" untuk mencoba lagi.');
+          }
+        };
+
+        eventSource.addEventListener('status', (event) => {
+          const data = JSON.parse(event.data);
+          appendLog('status', data);
+
+          if (data.connected) {
+            showQr(null);
+          }
+          if (data.status === 'LOGGED_OUT') {
+            showQr(null);
+          }
+        });
+
+        eventSource.addEventListener('qr', (event) => {
+          const data = JSON.parse(event.data);
+          appendLog('qr', data);
+          showQr(data.qr || null);
+        });
+
+        eventSource.onmessage = (event) => {
+          appendLog('event', event.data);
+          try {
+            const parsed = JSON.parse(event.data);
+            if (parsed?.qr) {
+              showQr(parsed.qr);
+            }
+          } catch {
+            // abaikan jika bukan JSON
+          }
+        };
+      }
+
+      function stopStream() {
+        if (eventSource) {
+          eventSource.close();
+          eventSource = null;
+          appendLog('info', 'Stream dihentikan secara manual');
+        }
+        updateStatus('disconnected', 'Terputus');
+        qrSession = null;
+      }
+
+      startBtn.addEventListener('click', startStream);
+      stopBtn.addEventListener('click', stopStream);
+      clearLogBtn.addEventListener('click', () => {
+        logOutput.textContent = '[log] belum ada data';
+      });
+
+      window.addEventListener('beforeunload', () => {
+        if (eventSource) {
+          eventSource.close();
+        }
+      });
+    </script>
+  </body>
+</html>

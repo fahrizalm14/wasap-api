@@ -5,7 +5,10 @@ import { env } from '@/config';
 import { App } from '@/core/App';
 import { createHttpServer } from '@/core/http/createHttpServer';
 import { createGlobalMiddlewares } from '@/core/http/createMiddlewares';
-import { createSocketIoAdapter, SOCKET_IO_SERVER_TOKEN } from '@/core/socket/socketIoAdapter';
+import {
+  createSocketIoAdapter,
+  SOCKET_IO_SERVER_TOKEN,
+} from '@/core/socket/socketIoAdapter';
 import { loadConfiguredModules } from '@/modules/loadModules';
 import { Logger } from '@/shared/utils/logger';
 

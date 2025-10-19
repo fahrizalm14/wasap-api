@@ -1,7 +1,10 @@
 import 'reflect-metadata';
 import { container } from 'tsyringe';
-import { API_KEYS_REPOSITORY_TOKEN, ApiKey } from '@/modules/api-keys/api-keys.interface';
-import { ApiKeysService } from '@/modules/api-keys/api-keys.service';
+import {
+  API_KEYS_REPOSITORY_TOKEN,
+  ApiKey,
+} from './api-keys.interface';
+import { ApiKeysService } from './api-keys.service';
 
 describe('ApiKeysService', () => {
   let repositoryMock: {
@@ -71,10 +74,14 @@ describe('ApiKeysService', () => {
     repositoryMock.findByKey.mockResolvedValueOnce(activeKey);
 
     const service = container.resolve(ApiKeysService);
-    await expect(service.assertActive('  wasap_active  ')).resolves.toEqual(activeKey);
+    await expect(service.assertActive('  wasap_active  ')).resolves.toEqual(
+      activeKey,
+    );
     expect(repositoryMock.findByKey).toHaveBeenCalledWith('wasap_active');
 
     repositoryMock.findByKey.mockResolvedValueOnce(null);
-    await expect(service.assertActive('unknown')).rejects.toThrow('API key not registered');
+    await expect(service.assertActive('unknown')).rejects.toThrow(
+      'API key not registered',
+    );
   });
 });

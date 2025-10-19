@@ -1,3 +1,40 @@
+/**
+ * Suite pengujian kontrak API tingkat aplikasi.
+ *
+ * Tujuan utama
+ * -------------
+ * 1. Menjamin seluruh endpoint yang terdokumentasi di OpenAPI berperilaku sesuai
+ *    dengan kontrak yang diharapkan (status code, payload sukses, payload error).
+ * 2. Memastikan seluruh skenario negatif yang didokumentasikan (403, 404, 500, dll)
+ *    ter-cover sehingga perubahan di masa depan tidak menghilangkan validasi penting.
+ * 3. Memvalidasi integrasi antar modul tanpa harus menjalankan HTTP server sesungguhnya,
+ *    sehingga tes tetap cepat, deterministik, dan tidak bergantung pada jaringan/IO.
+ *
+ * Strategi di dalam berkas ini
+ * ----------------------------
+ * - Menggunakan Jest untuk menyusun test-case per endpoint.
+ * - Menggunakan DI container milik aplikasi, namun controller dan service eksternal
+ *   diganti dengan stub sehingga logika bisnis dapat dimanipulasi (sukses/gagal).
+ * - Rute di-load dari modul produksi (`loadConfiguredModules`) agar struktur prefix,
+ *   middleware, dan handler yang diuji identik dengan runtime sebenarnya.
+ * - Tiap skenario memanggil handler HTTP secara langsung via `invokeRoute`, sehingga
+ *   kita tidak perlu spinning server Express/Fastify. Ini membuat tes lebih stabil.
+ * - Stub SSE (`whatsappSseStub`) merekam subscription untuk skenario streaming.
+ *
+ * Petunjuk pengembangan
+ * ----------------------
+ * - Tambahkan skenario baru apabila ada endpoint baru atau error case tambahan.
+ * - Gunakan helper `mockRequest` dan `mockResponse` bila membutuhkan header/payload khusus.
+ * - Ketika menambah dependency baru pada modul, mock-lah dependensi tersebut serupa cara
+ *   controller dimock di bagian atas file.
+ * - Jalankan `pnpm test -- --verbose` untuk output detail per skenario.
+ *
+ * Catatan penting
+ * ---------------
+ * - Seluruh komentar menggunakan bahasa Indonesia agar konsisten dengan dokumentasi repo.
+ * - Harap pertahankan struktur blok komentar ini untuk memudahkan pemeliharaan di masa depan.
+ */
+
 import 'reflect-metadata';
 
 import type { Request, Response } from 'express';
@@ -9,7 +46,7 @@ import type {
   RouteResponse,
 } from '../src/core/http/types';
 
-jest.mock('baileys', () => ({
+jest.mock('@whiskeysockets/baileys', () => ({
   __esModule: true,
   default: jest.fn(),
   fetchLatestBaileysVersion: jest.fn(),
@@ -17,16 +54,26 @@ jest.mock('baileys', () => ({
   DisconnectReason: {},
 }));
 
+/**
+ * Stub controller API Key untuk mensimulasikan perilaku endpoint saat pengujian.
+ * Setiap method menggunakan jest.fn agar dapat dimanipulasi dalam skenario tertentu.
+ */
 const apiKeysControllerStub = {
   list: jest.fn(),
   create: jest.fn(),
   deactivate: jest.fn(),
 };
 
+/**
+ * Stub controller Users, fokus pada method `listUsers`.
+ */
 const usersControllerStub = {
   listUsers: jest.fn(),
 };
 
+/**
+ * Stub controller WhatsApp; menyertakan seluruh operasi yang dipakai di rute.
+ */
 const whatsappControllerStub = {
   listSessions: jest.fn(),
   requestQr: jest.fn(),
@@ -36,6 +83,9 @@ const whatsappControllerStub = {
   currentQr: jest.fn(),
 };
 
+/**
+ * Stub layanan SSE WhatsApp untuk memverifikasi subscription tanpa koneksi nyata.
+ */
 const whatsappSseStub = {
   publishQr: jest.fn(),
   publishStatus: jest.fn(),
@@ -75,6 +125,10 @@ jest.mock('@/modules/whatsapp/whatsapp.sse', () => ({
   },
 }));
 
+/**
+ * Representasi kunci identifikasi rute.
+ * Menggabungkan prefix modul, metode, dan path relatif.
+ */
 type RouteKey = {
   prefix: string;
   method: RouteDefinition['method'];
@@ -84,18 +138,33 @@ type RouteKey = {
 describe('API route contracts', () => {
   const SECRET = 'test-secret';
 
+  /**
+   * Kolektor subscription SSE untuk memastikan initial payload benar.
+   */
   const sseSubscriptions: Array<{
     apiKey: string;
     initial: unknown;
   }> = [];
 
+  /**
+   * Penyimpanan rute yang dimuat agar mudah diakses berdasarkan key.
+   */
   const routeMap = new Map<string, RouteDefinition>();
+  /**
+   * Definisi khusus untuk endpoint health yang tidak termasuk modul.
+   */
   let healthRoute: RouteDefinition;
 
+  /**
+   * Menghasilkan kunci string unik untuk suatu rute.
+   */
   function mapKey({ prefix, method, path }: RouteKey): string {
     return `${prefix}|${method}|${path}`;
   }
 
+  /**
+   * Menyimpan seluruh definisi rute yang dimuat dari modul produksi.
+   */
   function registerRoutes(modules: ModuleDefinition[]): void {
     modules.forEach((module) => {
       for (const route of module.routes) {
@@ -111,6 +180,9 @@ describe('API route contracts', () => {
     });
   }
 
+  /**
+   * Parameter bantu untuk memodifikasi konteks handler saat pengujian.
+   */
   interface HandlerOverrides {
     framework?: RouteContext['framework'];
     raw?: Request | unknown;
@@ -120,16 +192,25 @@ describe('API route contracts', () => {
     body?: unknown;
   }
 
+  /**
+   * Menciptakan objek Request minimalis dengan header tertentu.
+   */
   function mockRequest(headers: Record<string, unknown> = {}): Request {
     return {
       headers,
     } as unknown as Request;
   }
 
+  /**
+   * Menciptakan objek Response dummy untuk kebutuhan handler.
+   */
   function mockResponse(): Response {
     return {} as unknown as Response;
   }
 
+  /**
+   * Memanggil handler rute sesuai key yang diberikan dan mengembalikan Response.
+   */
   function invokeRoute(
     key: RouteKey,
     overrides: HandlerOverrides = {},
@@ -151,6 +232,9 @@ describe('API route contracts', () => {
     return Promise.resolve(route.handler(context));
   }
 
+  /**
+   * Inisialisasi suite: reset container, muat modul, dan bangun health route.
+   */
   beforeAll(async () => {
     jest.resetModules();
     process.env.NODE_ENV = 'test';
@@ -184,6 +268,9 @@ describe('API route contracts', () => {
     };
   });
 
+  /**
+   * Reset stub sebelum setiap test agar tidak ada state tersisa antar skenario.
+   */
   beforeEach(() => {
     jest.clearAllMocks();
     sseSubscriptions.length = 0;

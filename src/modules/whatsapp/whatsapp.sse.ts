@@ -43,14 +43,29 @@ export class WhatsappSseService {
     response: Response,
     initial?: SseInitialState,
   ): void {
+    const requestOrigin = request.headers.origin;
+    const origin =
+      typeof requestOrigin === 'string' && requestOrigin.length > 0
+        ? requestOrigin
+        : '*';
     request.socket.setKeepAlive(true);
     request.socket.setTimeout(0);
 
-    response.writeHead(200, {
-      'Content-Type': 'text/event-stream',
-      'Cache-Control': 'no-cache',
+    const headers: Record<string, string> = {
+      'Content-Type': 'text/event-stream; charset=utf-8',
+      'Cache-Control': 'no-cache, no-transform',
       Connection: 'keep-alive',
-    });
+      'X-Accel-Buffering': 'no',
+      // Memungkinkan konsumsi SSE lintas origin (mis. dashboard front-end terpisah).
+      'Access-Control-Allow-Origin': origin,
+    };
+    const allowCredentials = origin !== '*' && origin !== 'null';
+    if (allowCredentials) {
+      headers['Access-Control-Allow-Credentials'] = 'true';
+    }
+    headers['Vary'] = 'Origin';
+
+    response.writeHead(200, headers);
 
     response.write(': connected\n\n');
 
@@ -83,9 +98,29 @@ export class WhatsappSseService {
     socket?.setKeepAlive(true);
     socket?.setTimeout(0);
 
-    reply.raw.setHeader('Content-Type', 'text/event-stream');
-    reply.raw.setHeader('Cache-Control', 'no-cache');
+    const originHeader = request.headers.origin;
+    const originCandidate =
+      typeof originHeader === 'string'
+        ? originHeader
+        : Array.isArray(originHeader)
+          ? originHeader[0]
+          : undefined;
+    const origin =
+      originCandidate && originCandidate.length > 0
+        ? originCandidate
+        : '*';
+
+    reply.raw.setHeader('Content-Type', 'text/event-stream; charset=utf-8');
+    reply.raw.setHeader('Cache-Control', 'no-cache, no-transform');
     reply.raw.setHeader('Connection', 'keep-alive');
+    reply.raw.setHeader('X-Accel-Buffering', 'no');
+    // Memungkinkan konsumsi SSE lintas origin (mis. dashboard front-end terpisah).
+    reply.raw.setHeader('Access-Control-Allow-Origin', origin);
+    const allowCredentials = origin !== '*' && origin !== 'null';
+    if (allowCredentials) {
+      reply.raw.setHeader('Access-Control-Allow-Credentials', 'true');
+    }
+    reply.raw.setHeader('Vary', 'Origin');
     reply.hijack();
     reply.raw.writeHead(200);
     reply.raw.write(': connected\n\n');

@@ -1,7 +1,7 @@
 import 'reflect-metadata';
 import { container } from 'tsyringe';
 
-jest.mock('baileys', () => ({
+jest.mock('@whiskeysockets/baileys', () => ({
   __esModule: true,
   default: jest.fn(),
   fetchLatestBaileysVersion: jest.fn().mockResolvedValue({ version: [2, 3000, 0] }),
