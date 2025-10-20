@@ -129,15 +129,25 @@ export class WhatsappService {
   }> {
     const sessions = await this.repository.listSessions();
     // Warm seluruh sesi yang sebelumnya CONNECTED atau DISCONNECTED supaya otomatis reconnect.
-    const candidates = sessions.filter((s) =>
-      s.status === 'CONNECTED' || s.status === 'DISCONNECTED'
+    const candidates = sessions.filter(
+      (s) => s.status === 'CONNECTED' || s.status === 'DISCONNECTED',
     );
     let connected = 0;
     let failed = 0;
     for (const s of candidates) {
       try {
+        // Hanya warm sesi yang sudah memiliki kredensial, agar tidak memicu QR
+        const creds = await this.repository.loadCreds(s.id);
+        if (!creds) {
+          this.devLog(
+            `[Warm] skip (no creds) apiKey=${s.apiKey} status=${s.status}`,
+          );
+          continue;
+        }
+
         const state = await this.initializeSocket(s);
-        await this.waitUntilConnected(state, 5_000).catch(() => undefined);
+        // Beri waktu lebih lama agar koneksi stabil
+        await this.waitUntilConnected(state, 15_000).catch(() => undefined);
         if (state.socket?.user) connected += 1;
       } catch (e) {
         failed += 1;
@@ -185,6 +195,10 @@ export class WhatsappService {
       normalizedKey,
       displayName,
     );
+    // Jika sesi sudah LOGGED_OUT, jangan memulai socket lagi agar QR tidak muncul
+    if (session.status === 'LOGGED_OUT') {
+      return { apiKey: normalizedKey, status: 'LOGGED_OUT' };
+    }
     const state = await this.initializeSocket(session);
 
     if (state.status === 'CONNECTED') {
@@ -798,8 +812,29 @@ export class WhatsappService {
     const session = await this.repository.findSessionByApiKey(normalizedKey);
     if (!session) throw new Error('Whatsapp session not found');
 
+    // Jika sesi sudah LOGGED_OUT, jangan paksa connect ketika kirim pesan
+    if (session.status === 'LOGGED_OUT') {
+      const err = new Error('Session is logged out');
+      (err as any).statusCode = 409;
+      throw err;
+    }
+
     const state = await this.initializeSocket(session);
-    await this.waitUntilConnected(state, 5_000).catch((error) => {
+    // Jika instance ini tidak memegang lock, berarti sesi dimiliki instance lain.
+    // Dalam skenario multi-instance, segera informasikan klien agar melakukan sticky routing.
+    if (!state.lockHeld && !state.socket?.user) {
+      const owner = await this.lockRepository.getOwner(session.apiKey).catch(() => null);
+      const err = new Error(
+        owner
+          ? `Session is handled by another instance (${owner}). Use sticky routing by apiKey or single instance.`
+          : 'Session is handled by another instance. Use sticky routing by apiKey or single instance.',
+      );
+      (err as any).statusCode = 423; // Locked
+      throw err;
+    }
+
+    // Tunggu lebih lama agar koneksi stabil bila kita pemegang lock
+    await this.waitUntilConnected(state, 20_000).catch(() => {
       const err = new Error('Session not connected');
       (err as any).statusCode = 503;
       throw err;

@@ -73,6 +73,7 @@ export interface IWhatsappLockRepository {
   touch(apiKey: string, ownerId: string): Promise<void>;
   release(apiKey: string, ownerId: string): Promise<void>;
   releaseAll(ownerId: string): Promise<void>;
+  getOwner(apiKey: string): Promise<string | null>;
 }
 
 export const WHATSAPP_LOCK_REPOSITORY_TOKEN = Symbol('WHATSAPP_LOCK_REPOSITORY_TOKEN');

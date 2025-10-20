@@ -81,4 +81,12 @@ export class PrismaWhatsappLockRepository implements IWhatsappLockRepository {
       where: { ownerId },
     });
   }
+
+  async getOwner(apiKey: string): Promise<string | null> {
+    const row = await this.prisma.whatsappSessionLock.findUnique({
+      where: { apiKey },
+      select: { ownerId: true },
+    });
+    return row?.ownerId ?? null;
+  }
 }
