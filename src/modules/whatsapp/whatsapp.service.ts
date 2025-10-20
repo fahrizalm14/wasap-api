@@ -7,6 +7,7 @@ import makeWASocket, {
   fetchLatestBaileysVersion,
   initAuthCreds,
 } from '@whiskeysockets/baileys';
+import { hostname } from 'os';
 import pino from 'pino';
 import { inject, singleton } from 'tsyringe';
 
@@ -14,13 +15,17 @@ import { env } from '@/config';
 import { ApiKeysService } from '@/modules/api-keys/api-keys.service';
 import type {
   IWhatsappRepository,
+  IWhatsappLockRepository,
   StoredWhatsappCredentials,
   WhatsappConnectionInfo,
   WhatsappQrResult,
   WhatsappSession,
   WhatsappSessionStatus,
 } from '@/modules/whatsapp/whatsapp.interface';
-import { WHATSAPP_REPOSITORY_TOKEN } from '@/modules/whatsapp/whatsapp.interface';
+import {
+  WHATSAPP_REPOSITORY_TOKEN,
+  WHATSAPP_LOCK_REPOSITORY_TOKEN,
+} from '@/modules/whatsapp/whatsapp.interface';
 import { WhatsappSseService } from '@/modules/whatsapp/whatsapp.sse';
 import { Logger } from '@/shared/utils/logger';
 
@@ -36,6 +41,9 @@ interface ManagedSession {
   qr?: string;
   connectPromise?: Promise<WASocket>;
   qrWaiters: QrWaiter[];
+  connectionWaiters: Array<{ resolve: () => void; reject: (error: Error) => void }>;
+  lockHeld?: boolean;
+  reconnectTimer?: NodeJS.Timeout;
 }
 
 /**
@@ -46,7 +54,7 @@ interface ManagedSession {
  */
 @singleton()
 export class WhatsappService {
-  private readonly sessions = new Map<string, ManagedSession>();
+  private readonly sessions: Map<string, ManagedSession>;
 
   private readonly socketLogger = pino({ level: 'error' });
 
@@ -56,16 +64,30 @@ export class WhatsappService {
 
   private readonly isDevelopment = env.NODE_ENV !== 'production';
 
+  private readonly lockOwnerId = `${hostname()}-${process.pid}`;
+
+  private readonly lockTtlMs = 5 * 60 * 1000;
+
   constructor(
     @inject(WHATSAPP_REPOSITORY_TOKEN)
     private readonly repository: IWhatsappRepository,
+    @inject(WHATSAPP_LOCK_REPOSITORY_TOKEN)
+    private readonly lockRepository: IWhatsappLockRepository,
     @inject(Logger) private readonly logger: Logger,
     @inject(ApiKeysService) private readonly apiKeysService: ApiKeysService,
     /**
      * Kanal distribusi SSE untuk mengirim status & QR secara real-time.
      */
     @inject(WhatsappSseService) private readonly sseService: WhatsappSseService,
-  ) {}
+  ) {
+    // Share session map across potential multiple service instances within same process
+    const g = globalThis as unknown as Record<string, unknown>;
+    const key = '__wa_sessions__';
+    if (!g[key]) {
+      g[key] = new Map<string, ManagedSession>();
+    }
+    this.sessions = g[key] as Map<string, ManagedSession>;
+  }
 
   /**
    * Cache sederhana untuk penghitung retry pesan (memenuhi kontrak CacheStore Baileys).
@@ -93,6 +115,51 @@ export class WhatsappService {
    */
   listSessions(): Promise<WhatsappSession[]> {
     return this.repository.listSessions();
+  }
+
+  /**
+   * Menginisialisasi koneksi untuk seluruh sesi non-LOGGED_OUT secara proaktif (warm up).
+   * Tidak gagal bila sebagian sesi error; hanya melakukan best-effort initializeSocket.
+   */
+  async warmSessions(): Promise<{
+    total: number;
+    attempted: number;
+    connected: number;
+    failed: number;
+  }> {
+    const sessions = await this.repository.listSessions();
+    // Warm seluruh sesi yang sebelumnya CONNECTED atau DISCONNECTED supaya otomatis reconnect.
+    const candidates = sessions.filter((s) =>
+      s.status === 'CONNECTED' || s.status === 'DISCONNECTED'
+    );
+    let connected = 0;
+    let failed = 0;
+    for (const s of candidates) {
+      try {
+        const state = await this.initializeSocket(s);
+        await this.waitUntilConnected(state, 5_000).catch(() => undefined);
+        if (state.socket?.user) connected += 1;
+      } catch (e) {
+        failed += 1;
+        this.logger.error(`Warm session failed apiKey=${s.apiKey}`, e as Error);
+      }
+    }
+    return {
+      total: sessions.length,
+      attempted: candidates.length,
+      connected,
+      failed,
+    };
+  }
+
+  /**
+   * Melepaskan seluruh lock sesi yang dipegang oleh proses ini (dipanggil saat shutdown).
+   */
+  async releaseAllLocks(): Promise<void> {
+    await this.lockRepository.releaseAll(this.lockOwnerId).catch(() => undefined);
+    for (const state of this.sessions.values()) {
+      state.lockHeld = false;
+    }
   }
 
   /**
@@ -166,6 +233,13 @@ export class WhatsappService {
       state.qr = undefined;
       state.status = 'LOGGED_OUT';
       state.qrWaiters = [];
+      this.rejectConnectionWaiters(state, new Error('Logged out'));
+      if (state.lockHeld) {
+        await this.lockRepository
+          .release(state.info.apiKey, this.lockOwnerId)
+          .catch(() => undefined);
+        state.lockHeld = false;
+      }
       this.emitStatusUpdate(state);
       this.sessions.delete(normalizedKey);
     } else {
@@ -292,10 +366,14 @@ export class WhatsappService {
         info: session,
         status: session.status,
         qrWaiters: [],
+        connectionWaiters: [],
       };
       this.sessions.set(session.apiKey, state);
     } else {
       state.info = session;
+      if (!state.connectionWaiters) {
+        state.connectionWaiters = [];
+      }
     }
 
     if (state.socket?.user) {
@@ -303,17 +381,52 @@ export class WhatsappService {
     }
 
     if (!state.connectPromise) {
+      if (!state.lockHeld) {
+        const ok = await this.lockRepository.acquire(
+          session.apiKey,
+          this.lockOwnerId,
+          this.lockTtlMs,
+        );
+        if (!ok) {
+          this.devLog(
+            `[Baileys] skip connect (lock held by another process) session=${session.apiKey}`,
+          );
+          return state;
+        }
+        state.lockHeld = true;
+      } else {
+        await this.lockRepository
+          .touch(session.apiKey, this.lockOwnerId)
+          .catch(() => undefined);
+      }
+
       state.connectPromise = this.createSocket(state)
         .catch((error) => {
           this.logger.error('Failed to initialize WhatsApp socket', error);
+          if (state.lockHeld) {
+            void this.lockRepository
+              .release(state.info.apiKey, this.lockOwnerId)
+              .finally(() => {
+                state.lockHeld = false;
+              });
+          }
           throw error;
         })
         .finally(() => {
           state.connectPromise = undefined;
         });
+    } else if (state.lockHeld) {
+      await this.lockRepository
+        .touch(session.apiKey, this.lockOwnerId)
+        .catch(() => undefined);
     }
 
     await state.connectPromise;
+    if (state.lockHeld) {
+      await this.lockRepository
+        .touch(session.apiKey, this.lockOwnerId)
+        .catch(() => undefined);
+    }
     return state;
   }
 
@@ -338,7 +451,7 @@ export class WhatsappService {
          */
         markOnlineOnConnect: true,
         syncFullHistory: false,
-        generateHighQualityLinkPreview: true,
+        generateHighQualityLinkPreview: false,
         connectTimeoutMs: 60_000,
         keepAliveIntervalMs: 30_000,
         defaultQueryTimeoutMs: undefined,
@@ -459,7 +572,17 @@ export class WhatsappService {
       this.emitQrUpdate(state.info.apiKey, null);
       this.devLog(`[Baileys] connection open session=${state.info.apiKey}`);
       await this.updateSessionStatus(state, 'CONNECTED');
+      if (state.lockHeld) {
+        await this.lockRepository
+          .touch(state.info.apiKey, this.lockOwnerId)
+          .catch(() => undefined);
+      }
+      if (state.reconnectTimer) {
+        clearTimeout(state.reconnectTimer);
+        state.reconnectTimer = undefined;
+      }
       this.clearQrWaiters(state);
+      this.resolveConnectionWaiters(state);
     }
 
     if (connection === 'close') {
@@ -476,8 +599,23 @@ export class WhatsappService {
         }`,
       );
 
+      const previousSocket = state.socket;
       state.qr = undefined;
       this.emitQrUpdate(state.info.apiKey, null);
+
+      if (state.reconnectTimer) {
+        clearTimeout(state.reconnectTimer);
+        state.reconnectTimer = undefined;
+      }
+
+      if (previousSocket) {
+        try {
+          previousSocket.ws.close();
+        } catch {
+          // ignore
+        }
+      }
+      state.socket = undefined;
 
       if (loggedOut) {
         this.devLog(
@@ -485,29 +623,26 @@ export class WhatsappService {
         );
         await this.repository.clearSessionData(state.info.id);
         await this.updateSessionStatus(state, 'LOGGED_OUT');
+        if (state.lockHeld) {
+          await this.lockRepository
+            .release(state.info.apiKey, this.lockOwnerId)
+            .catch(() => undefined);
+          state.lockHeld = false;
+        }
+        this.msgRetryCounterCache.del(`reconnect:${state.info.apiKey}`);
         this.sessions.delete(state.info.apiKey);
       } else {
         await this.updateSessionStatus(state, 'DISCONNECTED');
-        // Coba reconnect otomatis untuk kasus selain loggedOut
-        setTimeout(() => {
-          if (!state.connectPromise && !state.socket?.user) {
-            this.devLog(
-              `[Baileys] attempting reconnect session=${state.info.apiKey}`,
-            );
-            state.connectPromise = this.createSocket(state)
-              .catch((err) => {
-                this.logger.error('Failed to reconnect WhatsApp socket', err);
-                throw err;
-              })
-              .finally(() => {
-                state.connectPromise = undefined;
-              });
-          }
-        }, 1000);
+        this.scheduleReconnect(state, statusCode);
       }
 
-      state.socket = undefined;
-      this.rejectQrWaiters(state, new Error('WhatsApp connection closed'));
+      const closeError = new Error('WhatsApp connection closed');
+      this.rejectQrWaiters(state, closeError);
+      this.rejectConnectionWaiters(state, closeError);
+    }
+    // Reset backoff on successful open
+    if (connection === 'open') {
+      this.msgRetryCounterCache.del(`reconnect:${state.info.apiKey}`);
     }
   }
 
@@ -536,5 +671,166 @@ export class WhatsappService {
 
   private clearQrWaiters(state: ManagedSession) {
     state.qrWaiters = [];
+  }
+
+  private resolveConnectionWaiters(state: ManagedSession) {
+    if (!state.connectionWaiters) return;
+    state.connectionWaiters.forEach((waiter) => waiter.resolve());
+    state.connectionWaiters = [];
+  }
+
+  private rejectConnectionWaiters(state: ManagedSession, error: Error) {
+    if (!state.connectionWaiters) return;
+    state.connectionWaiters.forEach((waiter) => waiter.reject(error));
+    state.connectionWaiters = [];
+  }
+
+  private scheduleReconnect(
+    state: ManagedSession,
+    statusCode?: number,
+  ): void {
+    const attemptKey = `reconnect:${state.info.apiKey}`;
+    const attempt = (this.msgRetryCounterCache.get<number>(attemptKey) ?? 0) + 1;
+    this.msgRetryCounterCache.set(attemptKey, attempt);
+
+    const cappedExponent = Math.min(attempt - 1, 5);
+    const baseDelay = 1_000 * 2 ** cappedExponent;
+    const delay = Math.min(30_000, baseDelay) + Math.floor(Math.random() * 500);
+
+    if (state.reconnectTimer) {
+      clearTimeout(state.reconnectTimer);
+    }
+
+    this.devLog(
+      `[Baileys] scheduled reconnect session=${state.info.apiKey} attempt=${attempt} delay=${delay}ms statusCode=${statusCode ?? 'n/a'}`,
+    );
+
+    state.reconnectTimer = setTimeout(() => {
+      state.reconnectTimer = undefined;
+
+      if (state.socket?.user || state.connectPromise) {
+        this.devLog(
+          `[Baileys] skip reconnect (already active) session=${state.info.apiKey}`,
+        );
+        return;
+      }
+
+      const connectTask = (async () => {
+        if (!state.lockHeld) {
+          const acquired = await this.lockRepository.acquire(
+            state.info.apiKey,
+            this.lockOwnerId,
+            this.lockTtlMs,
+          );
+          if (!acquired) {
+            throw new Error('Failed to acquire lock for reconnect');
+          }
+          state.lockHeld = true;
+        } else {
+          await this.lockRepository
+            .touch(state.info.apiKey, this.lockOwnerId)
+            .catch(() => undefined);
+        }
+
+        return await this.createSocket(state);
+      })();
+
+      state.connectPromise = connectTask
+        .catch((error) => {
+          this.logger.error(
+            `Failed to reconnect WhatsApp socket apiKey=${state.info.apiKey}`,
+            error,
+          );
+          this.scheduleReconnect(state, statusCode);
+          throw error;
+        })
+        .finally(() => {
+          if (state.connectPromise === connectTask) {
+            state.connectPromise = undefined;
+          }
+        });
+    }, delay);
+  }
+
+  private async waitUntilConnected(state: ManagedSession, timeoutMs: number): Promise<void> {
+    if (state.socket?.user) {
+      return;
+    }
+
+    await new Promise<void>((resolve, reject) => {
+      let finished = false;
+      let timer: NodeJS.Timeout;
+
+      const waiter = {
+        resolve: () => {
+          if (finished) return;
+          finished = true;
+          clearTimeout(timer);
+          state.connectionWaiters = state.connectionWaiters.filter((candidate) => candidate !== waiter);
+          resolve();
+        },
+        reject: (error: Error) => {
+          if (finished) return;
+          finished = true;
+          clearTimeout(timer);
+          state.connectionWaiters = state.connectionWaiters.filter((candidate) => candidate !== waiter);
+          reject(error);
+        },
+      } as { resolve: () => void; reject: (error: Error) => void };
+
+      timer = setTimeout(() => {
+        if (finished) return;
+        finished = true;
+        state.connectionWaiters = state.connectionWaiters.filter((candidate) => candidate !== waiter);
+        reject(new Error('WhatsApp session not connected'));
+      }, timeoutMs);
+
+      state.connectionWaiters.push(waiter);
+    });
+  }
+
+  /**
+   * Kirim pesan teks ke JID menggunakan sesi milik apiKey.
+   * Mengharuskan status CONNECTED; jika tidak, melempar error 503.
+   */
+  async sendText(apiKey: string, to: string, text: string): Promise<{ messageId: string }>{
+    const normalizedKey = await this.ensureActiveKey(apiKey);
+    const session = await this.repository.findSessionByApiKey(normalizedKey);
+    if (!session) throw new Error('Whatsapp session not found');
+
+    const state = await this.initializeSocket(session);
+    await this.waitUntilConnected(state, 5_000).catch((error) => {
+      const err = new Error('Session not connected');
+      (err as any).statusCode = 503;
+      throw err;
+    });
+    const socket = state.socket;
+    if (!socket?.user) {
+      const err = new Error('Session not connected');
+      (err as any).statusCode = 503;
+      throw err;
+    }
+
+    // Normalize MSISDN: remove spaces, dashes, parentheses; drop leading '+'; convert local 0-prefix to 62
+    let msisdn = to.trim().replace(/[()\s-]/g, '');
+    if (msisdn.startsWith('+')) msisdn = msisdn.slice(1);
+    if (msisdn.startsWith('0')) msisdn = '62' + msisdn.slice(1);
+    if (!/^\d{8,15}$/.test(msisdn)) {
+      const err = new Error("Invalid 'to' (use digits, 8-15, with country code)");
+      (err as any).statusCode = 400;
+      throw err;
+    }
+    const jid = `${msisdn}@s.whatsapp.net`;
+    const result = await socket.sendMessage(jid, { text });
+    const messageId = result?.key?.id ?? '';
+    if (state.lockHeld) {
+      await this.lockRepository
+        .touch(session.apiKey, this.lockOwnerId)
+        .catch(() => undefined);
+    }
+    this.logger.info(
+      `[WhatsApp] message sent apiKey=${normalizedKey} to=${msisdn} messageId=${messageId || 'unknown'}`,
+    );
+    return { messageId };
   }
 }

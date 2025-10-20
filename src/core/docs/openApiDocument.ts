@@ -37,6 +37,54 @@ export const openApiDocument = {
         },
       },
     },
+    '/api/v1/whatsapp/message/{apiKey}/send': {
+      post: {
+        tags: ['WhatsApp'],
+        summary: 'Kirim pesan teks',
+        description: 'Mengirim pesan teks menggunakan sesi WhatsApp yang sudah CONNECTED.',
+        parameters: [
+          {
+            name: 'apiKey',
+            in: 'path',
+            required: true,
+            description: 'API key unik untuk sesi WhatsApp.',
+            schema: { type: 'string' },
+          },
+        ],
+        requestBody: {
+          required: true,
+          content: {
+            'application/json': {
+              schema: { $ref: '#/components/schemas/SendTextPayload' },
+              example: { to: '6281234567890', text: 'Halo dari Baileys!' },
+            },
+          },
+        },
+        responses: {
+          200: {
+            description: 'Pesan berhasil dikirim.',
+            content: {
+              'application/json': {
+                schema: { $ref: '#/components/schemas/SendTextResponse' },
+              },
+            },
+          },
+          400: { $ref: '#/components/responses/BadRequestError' },
+          403: { $ref: '#/components/responses/ForbiddenError' },
+          404: { $ref: '#/components/responses/NotFoundError' },
+          503: {
+            description: 'Sesi tidak tersambung (not connected).',
+            content: {
+              'application/json': {
+                schema: { $ref: '#/components/schemas/ErrorResponse' },
+                example: { status: 'error', message: 'Session not connected' },
+              },
+            },
+          },
+          500: { $ref: '#/components/responses/InternalServerError' },
+        },
+      },
+    },
     '/api/v1/users': {
       get: {
         tags: ['Users'],
@@ -510,6 +558,38 @@ export const openApiDocument = {
         },
         required: ['status', 'data'],
       },
+      SendTextPayload: {
+        type: 'object',
+        properties: {
+          to: {
+            type: 'string',
+            description: 'Nomor tujuan dalam format MSISDN tanpa plus, 8–15 digit.',
+            example: '6281234567890',
+          },
+          text: {
+            type: 'string',
+            description: 'Isi pesan teks 1–1000 karakter.',
+            example: 'Halo dari Baileys!',
+          },
+        },
+        required: ['to', 'text'],
+        additionalProperties: false,
+      },
+      SendTextResult: {
+        type: 'object',
+        properties: {
+          messageId: { type: 'string', example: 'wamid.HBgM...' },
+        },
+        required: ['messageId'],
+      },
+      SendTextResponse: {
+        type: 'object',
+        properties: {
+          status: { type: 'string', example: 'success' },
+          data: { $ref: '#/components/schemas/SendTextResult' },
+        },
+        required: ['status', 'data'],
+      },
       StoredWhatsappCredentials: {
         type: 'object',
         properties: {
@@ -572,6 +652,15 @@ export const openApiDocument = {
       },
     },
     responses: {
+      BadRequestError: {
+        description: 'Permintaan tidak valid.',
+        content: {
+          'application/json': {
+            schema: { $ref: '#/components/schemas/ErrorResponse' },
+            example: { status: 'error', message: 'Invalid "to"' },
+          },
+        },
+      },
       NotFoundError: {
         description: 'Resource tidak ditemukan.',
         content: {

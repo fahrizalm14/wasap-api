@@ -35,4 +35,8 @@ export class WhatsappController {
   currentQr(apiKey: string): string | null {
     return this.service.getCurrentQr(apiKey);
   }
+
+  async sendText(apiKey: string, to: string, text: string): Promise<{ messageId: string }>{
+    return this.service.sendText(apiKey, to, text);
+  }
 }

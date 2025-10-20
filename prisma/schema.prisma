@@ -58,3 +58,12 @@ model WhatsappCredential {
 
   @@unique([sessionId, type, keyId])
 }
+
+model WhatsappSessionLock {
+  apiKey     String   @id
+  ownerId    String
+  acquiredAt DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+
+  @@index([ownerId])
+}

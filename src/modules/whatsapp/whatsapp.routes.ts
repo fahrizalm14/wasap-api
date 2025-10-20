@@ -154,6 +154,65 @@ const routes: RouteDefinition[] = [
       }
     },
   },
+  {
+    method: 'POST',
+    path: '/message/:apiKey/send',
+    handler: async (ctx) => {
+      const apiKey = ctx.params.apiKey;
+      const body = (ctx.body ?? {}) as { to?: unknown; text?: unknown };
+      const rawTo = typeof body.to === 'string' ? body.to : '';
+      // normalize MSISDN: strip spaces, dashes, parentheses; trim leading '+'; convert leading 0 -> 62
+      let to = rawTo.trim().replace(/[()\s-]/g, '');
+      if (to.startsWith('+')) to = to.slice(1);
+      if (to.startsWith('0')) to = '62' + to.slice(1);
+      const text = typeof body.text === 'string' ? body.text : '';
+
+      // basic validation
+      const toValid = /^\d{8,15}$/.test(to);
+      const textValid = text.length > 0 && text.length <= 1000;
+      if (!toValid || !textValid) {
+        return {
+          status: 400,
+          body: {
+            status: 'error',
+            message: !toValid
+              ? "Invalid 'to' (use digits, 8-15)"
+              : "Invalid 'text' (1-1000 chars)",
+          },
+        };
+      }
+
+      try {
+        const data = await controller.sendText(apiKey, to, text);
+        return { status: 200, body: { status: 'success', data } };
+      } catch (error) {
+        if (error instanceof Error) {
+          if ((error as any).statusCode === 503) {
+            return {
+              status: 503,
+              body: { status: 'error', message: 'Session not connected' },
+            };
+          }
+          if (error.message === 'API key not registered') {
+            return {
+              status: 403,
+              body: { status: 'error', message: error.message },
+            };
+          }
+          if (error.message === 'Whatsapp session not found') {
+            return {
+              status: 404,
+              body: { status: 'error', message: error.message },
+            };
+          }
+        }
+        return {
+          status: 500,
+          body: { status: 'error', message: 'Internal server error' },
+        };
+      }
+    },
+  },
 ];
 
 export default function createWhatsappModule(): ModuleBuildResult {

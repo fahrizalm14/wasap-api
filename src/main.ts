@@ -55,6 +55,25 @@ async function main() {
   modules.forEach((module) => app.registerModule(module));
 
   await app.start();
+
+  // Warm sessions: initialize WhatsApp sockets for non-logged-out sessions
+  try {
+    const { WhatsappService } = await import('@/modules/whatsapp/whatsapp.service');
+    const service = container.resolve(WhatsappService);
+    const summary = await service.warmSessions();
+    if (summary.attempted) {
+      logger.info(
+        `Warm sessions: attempted=${summary.attempted} connected=${summary.connected} failed=${summary.failed}`,
+      );
+    }
+    app.registerCleanup(async () => {
+      await service.releaseAllLocks().catch((err) => {
+        logger.error('Failed to release WhatsApp session locks', err as Error);
+      });
+    });
+  } catch (e) {
+    logger.error('Warm sessions step skipped', e as Error);
+  }
 }
 
 main().catch((error) => {
