@@ -34,3 +34,4 @@ jest-html-reporters-*.html
 
 # Ignore production env in deploys
 deploys/
+prisma/dev.db
