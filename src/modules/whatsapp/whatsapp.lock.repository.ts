@@ -18,6 +18,7 @@ export class PrismaWhatsappLockRepository implements IWhatsappLockRepository {
 
   async acquire(apiKey: string, ownerId: string, ttlMs: number): Promise<boolean> {
     const now = new Date();
+    // Hitung batas waktu kadaluarsa lock berdasarkan TTL
     const staleBefore = new Date(now.getTime() - ttlMs);
 
     try {
@@ -33,6 +34,7 @@ export class PrismaWhatsappLockRepository implements IWhatsappLockRepository {
           return true;
         }
 
+        // Jika sudah milik owner ini, perpanjang timestamp
         if (existing.ownerId === ownerId) {
           await tx.whatsappSessionLock.update({
             where: { apiKey },
@@ -41,6 +43,7 @@ export class PrismaWhatsappLockRepository implements IWhatsappLockRepository {
           return true;
         }
 
+        // Jika lock sudah kadaluarsa, lepas dan ambil oleh owner baru
         if (existing.acquiredAt < staleBefore) {
           await tx.whatsappSessionLock.update({
             where: { apiKey },
@@ -56,6 +59,7 @@ export class PrismaWhatsappLockRepository implements IWhatsappLockRepository {
         error instanceof Prisma.PrismaClientKnownRequestError &&
         error.code === 'P2034'
       ) {
+        // Kontensi tinggi -> lock diambil oleh proses lain
         return false;
       }
       throw error;

@@ -1,6 +1,7 @@
 import 'reflect-metadata';
 import { container } from 'tsyringe';
 
+// Mock Baileys agar tidak memanggil koneksi nyata saat pengujian
 jest.mock('@whiskeysockets/baileys', () => ({
   __esModule: true,
   default: jest.fn(),
@@ -55,11 +56,13 @@ describe('WhatsappService', () => {
     getCredentialDump: jest.fn<Promise<StoredWhatsappCredentials>, [number]>(),
   } as const;
 
+  // Logger dummy untuk memastikan service bisa log tanpa efek samping
   const loggerMock: Logger = {
     info: jest.fn(),
     error: jest.fn(),
   } as unknown as Logger;
 
+  // SSE service stub supaya test tidak perlu koneksi nyata
   const sseMock: WhatsappSseService = {
     publishQr: jest.fn(),
     publishStatus: jest.fn(),

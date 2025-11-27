@@ -14,7 +14,7 @@ describe('waCrypto', () => {
     const payload = encryptJson({ a: 1 }, { apiKey, kver });
     expect(isEncryptedPayload(payload)).toBe(true);
 
-    // tamper a field to break the type guard
+    // ubah salah satu field agar type guard tidak terpenuhi
     const invalid: any = { ...payload, kver: '1' };
     expect(isEncryptedPayload(invalid)).toBe(false);
   });
@@ -49,11 +49,11 @@ describe('waCrypto', () => {
     const obj = { msg: 'hello' };
     const p1 = encryptJson(obj, { apiKey, kver, salt });
     const p2 = encryptJson(obj, { apiKey, kver, salt });
-    // Same salt -> same derived key, but different nonce -> ciphertexts likely differ
+    // Salt sama mengarah pada kunci turunan yang identik, meski nonce berbeda
     expect(p1.salt).toBe(p2.salt);
-    // Nonces should differ
+    // Nonce seharusnya berbeda agar ciphertext tetap unique
     expect(p1.nonce).not.toBe(p2.nonce);
-    // Both decrypt correctly
+    // Keduanya tetap bisa didekripsi dengan benar
     expect(decryptJson(p1, { apiKey })).toEqual(obj);
     expect(decryptJson(p2, { apiKey })).toEqual(obj);
   });
@@ -64,4 +64,3 @@ describe('waCrypto', () => {
     expect(() => decryptJson(payload, { apiKey: 'wrong-key' })).toThrow();
   });
 });
-

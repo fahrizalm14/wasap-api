@@ -24,7 +24,7 @@ export function makeStableSalt(size = 32): Buffer {
 }
 export function deriveKey(params: { apiKey: string; salt: Buffer }): Buffer {
   const { apiKey, salt } = params;
-  // HKDF-SHA256 derive 32 bytes key
+  // Menggunakan HKDF-SHA256 untuk mendapatkan kunci 32 byte yang konsisten dari apiKey + salt
   return Buffer.from(
     crypto.hkdfSync(
       'sha256',
@@ -44,6 +44,7 @@ export function encryptJson(
   const key = deriveKey({ apiKey, salt });
   const nonce = crypto.randomBytes(12);
   const cipher = crypto.createCipheriv('aes-256-gcm', key, nonce);
+  // Enkripsi payload JSON dan ambil ciphertext + tag autentikasi
   const plaintext = Buffer.from(JSON.stringify(value), 'utf8');
   const ct = Buffer.concat([cipher.update(plaintext), cipher.final()]);
   const tag = cipher.getAuthTag();
@@ -67,6 +68,7 @@ export function decryptJson(
   const ct = Buffer.from(payload.ct, 'base64');
   const tag = Buffer.from(payload.tag, 'base64');
   const decipher = crypto.createDecipheriv('aes-256-gcm', key, nonce);
+  // Validasi tag autentikasi dan pulihkan JSON asli
   decipher.setAuthTag(tag);
   const pt = Buffer.concat([decipher.update(ct), decipher.final()]);
   return JSON.parse(pt.toString('utf8'));

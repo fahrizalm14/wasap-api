@@ -31,6 +31,7 @@ export class WhatsappSseService {
 
   constructor() {
     this.heartbeatTimer = setInterval(() => this.dispatchHeartbeat(), this.heartbeatMs);
+    // Heartbeat memastikan koneksi SSE tidak ditutup oleh proxy/load balancer
     this.heartbeatTimer.unref?.();
   }
 

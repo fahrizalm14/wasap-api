@@ -84,18 +84,18 @@ export class PrismaWhatsappRepository implements IWhatsappRepository {
       return null;
     }
 
-    // Support both plaintext JSON and encrypted payload (for backward compatibility)
+    // Dukung JSON polos sekaligus payload terenkripsi agar kompatibel dengan data lama
     const raw = this.fromJsonValue<unknown>(session.creds);
     if (raw && isEncryptedPayload(raw)) {
       const apiKey = await this.getApiKeyBySessionId(sessionId);
       const decrypted = decryptJson(raw, { apiKey });
-      // Important: revive Buffers for Baileys using BufferJSON.reviver
+      // Pastikan Buffer yang diserialisasi kembali bisa digunakan oleh Baileys
       return JSON.parse(
         JSON.stringify(decrypted),
         BufferJSON.reviver,
       ) as AuthenticationCreds;
     }
-    // If not encrypted, it already passed through fromJsonValue which revives buffers
+    // Kalau tidak terenkripsi, fromJsonValue sudah menjalankan reviver secara otomatis
     return raw as AuthenticationCreds | null;
   }
 
@@ -137,6 +137,7 @@ export class PrismaWhatsappRepository implements IWhatsappRepository {
 
     const apiKey = await this.getApiKeyBySessionId(sessionId);
     for (const record of records) {
+      // Ambil value JSON yang tersimpan, lalu dekripsi bila perlu
       const parsed = this.fromJsonValue<unknown>(record.value);
       const value = (parsed && isEncryptedPayload(parsed)
         ? (JSON.parse(
@@ -145,6 +146,7 @@ export class PrismaWhatsappRepository implements IWhatsappRepository {
           ) as SignalDataTypeMap[K])
         : (parsed as SignalDataTypeMap[K] | null));
       if (value && type === 'app-state-sync-key') {
+        // Baileys mengharapkan struktur AppStateSyncKeyData versi proto
         const appStateKey = proto.Message.AppStateSyncKeyData.fromObject(
           value as proto.Message.IAppStateSyncKeyData,
         );
@@ -167,6 +169,7 @@ export class PrismaWhatsappRepository implements IWhatsappRepository {
     }>;
   }): Promise<void> {
     const { sessionId, values } = data;
+    // Kumpulkan semua operasi database agar bisa dijalankan bersamaan
     const tasks: Promise<unknown>[] = [];
 
     for (const category of Object.keys(values) as (keyof SignalDataTypeMap)[]) {
@@ -224,6 +227,7 @@ export class PrismaWhatsappRepository implements IWhatsappRepository {
     await Promise.all(tasks);
   }
 
+  // Pastikan data app-state sync diterjemahkan ke bentuk POJO sebelum diserialisasi
   private normalizeValueForStorage(
     category: string,
     value: SignalDataTypeMap[keyof SignalDataTypeMap],
@@ -245,6 +249,7 @@ export class PrismaWhatsappRepository implements IWhatsappRepository {
   }
 
   async clearSessionData(sessionId: number): Promise<void> {
+    // Hapus semua kredensial + reset field creds sekaligus
     await this.prisma.$transaction([
       this.prisma.whatsappCredential.deleteMany({
         where: { sessionId },
@@ -271,6 +276,7 @@ export class PrismaWhatsappRepository implements IWhatsappRepository {
       throw new Error('Whatsapp session not found');
     }
 
+    // Buat salinan data agar tidak memodifikasi referensi Prisma langsung
     const creds = session.creds
       ? (JSON.parse(JSON.stringify(session.creds)) as Record<string, unknown>)
       : null;
@@ -282,6 +288,7 @@ export class PrismaWhatsappRepository implements IWhatsappRepository {
         keys[credential.type] = {};
       }
 
+      // Simpan salinan JSON credential agar tidak merubah data Prisma
       keys[credential.type][credential.keyId] = credential.value
         ? (JSON.parse(JSON.stringify(credential.value)) as Record<
             string,
@@ -322,12 +329,14 @@ export class PrismaWhatsappRepository implements IWhatsappRepository {
     return row.apiKey;
   }
 
+  // Gunakan replacer BufferJSON agar Buffer diserialisasi ke JSON
   private toJsonValue(value: unknown): Prisma.InputJsonValue {
     return JSON.parse(
       JSON.stringify(value, BufferJSON.replacer),
     ) as Prisma.InputJsonValue;
   }
 
+  // Kembalikan Buffer menggunakan reviver BufferJSON saat membaca dari database
   private fromJsonValue<T>(value: Prisma.JsonValue | null): T | null {
     if (value === null || value === undefined) {
       return null;

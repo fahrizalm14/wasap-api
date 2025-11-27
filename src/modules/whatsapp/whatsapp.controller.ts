@@ -9,6 +9,7 @@ import {
 } from '@/modules/whatsapp/whatsapp.interface';
 
 @injectable()
+// Kontroler ini hanya meneruskan permintaan ke WhatsappService
 export class WhatsappController {
   constructor(@inject(WhatsappService) private readonly service: WhatsappService) {}
 
@@ -36,6 +37,7 @@ export class WhatsappController {
     return this.service.getCurrentQr(apiKey);
   }
 
+  // Minta pengiriman teks via service; hanya pengenal apiKey + payload
   async sendText(apiKey: string, to: string, text: string): Promise<{ messageId: string }>{
     return this.service.sendText(apiKey, to, text);
   }

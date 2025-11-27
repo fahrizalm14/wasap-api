@@ -80,7 +80,7 @@ export class WhatsappService {
      */
     @inject(WhatsappSseService) private readonly sseService: WhatsappSseService,
   ) {
-    // Share session map across potential multiple service instances within same process
+    // Bagi map sesi agar bisa digunakan oleh beberapa instance dalam proses yang sama
     const g = globalThis as unknown as Record<string, unknown>;
     const key = '__wa_sessions__';
     if (!g[key]) {
@@ -233,7 +233,7 @@ export class WhatsappService {
       try {
         state.socket.ws.close();
       } catch {
-        // ignore
+        // abaikan
       }
     }
 
@@ -626,8 +626,8 @@ export class WhatsappService {
         try {
           previousSocket.ws.close();
         } catch {
-          // ignore
-        }
+        // abaikan
+      }
       }
       state.socket = undefined;
 
@@ -654,7 +654,7 @@ export class WhatsappService {
       this.rejectQrWaiters(state, closeError);
       this.rejectConnectionWaiters(state, closeError);
     }
-    // Reset backoff on successful open
+    // Reset backoff saat koneksi berhasil terbuka
     if (connection === 'open') {
       this.msgRetryCounterCache.del(`reconnect:${state.info.apiKey}`);
     }
@@ -829,7 +829,7 @@ export class WhatsappService {
           ? `Session is handled by another instance (${owner}). Use sticky routing by apiKey or single instance.`
           : 'Session is handled by another instance. Use sticky routing by apiKey or single instance.',
       );
-      (err as any).statusCode = 423; // Locked
+      (err as any).statusCode = 423; // Terkunci
       throw err;
     }
 
@@ -846,7 +846,7 @@ export class WhatsappService {
       throw err;
     }
 
-    // Normalize MSISDN: remove spaces, dashes, parentheses; drop leading '+'; convert local 0-prefix to 62
+    // Normalisasi MSISDN: hapus spasi/pemisah, hilangkan '+', ubah prefix 0 menjadi 62
     let msisdn = to.trim().replace(/[()\s-]/g, '');
     if (msisdn.startsWith('+')) msisdn = msisdn.slice(1);
     if (msisdn.startsWith('0')) msisdn = '62' + msisdn.slice(1);

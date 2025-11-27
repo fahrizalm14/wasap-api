@@ -106,22 +106,22 @@ const routes: RouteDefinition[] = [
       }
     },
   },
-  // {
-  //   method: 'GET',
-  //   path: '/sessions/:apiKey/credentials',
-  //   handler: async (ctx) => {
-  //     const apiKey = ctx.params.apiKey;
-  //     try {
-  //       const data = await controller.getCredentials(apiKey);
-  //       return {
-  //         status: 200,
-  //         body: { status: 'success', data },
-  //       };
-  //     } catch (error) {
-  //       return handleError(error);
-  //     }
-  //   },
-  // },
+  {
+    method: 'GET',
+    path: '/sessions/:apiKey/credentials',
+    handler: async (ctx) => {
+      const apiKey = ctx.params.apiKey;
+      try {
+        const data = await controller.getCredentials(apiKey);
+        return {
+          status: 200,
+          body: { status: 'success', data },
+        };
+      } catch (error) {
+        return handleError(error);
+      }
+    },
+  },
   {
     method: 'POST',
     path: '/sessions/:apiKey/logout',
@@ -161,13 +161,13 @@ const routes: RouteDefinition[] = [
       const apiKey = ctx.params.apiKey;
       const body = (ctx.body ?? {}) as { to?: unknown; text?: unknown };
       const rawTo = typeof body.to === 'string' ? body.to : '';
-      // normalize MSISDN: strip spaces, dashes, parentheses; trim leading '+'; convert leading 0 -> 62
+      // Normalisasi MSISDN: buang spasi/pemisah, hilangkan '+', ubah prefix 0 jadi 62
       let to = rawTo.trim().replace(/[()\s-]/g, '');
       if (to.startsWith('+')) to = to.slice(1);
       if (to.startsWith('0')) to = '62' + to.slice(1);
       const text = typeof body.text === 'string' ? body.text : '';
 
-      // basic validation
+      // Validasi sederhana agar format MSISDN + teks sesuai aturan
       const toValid = /^\d{8,15}$/.test(to);
       const textValid = text.length > 0 && text.length <= 1000;
       if (!toValid || !textValid) {

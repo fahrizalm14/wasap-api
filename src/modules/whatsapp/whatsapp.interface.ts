@@ -33,6 +33,7 @@ export interface WhatsappConnectionInfo {
   connected: boolean;
 }
 
+// Status autentikasi yang disediakan ke Baileys agar bisa menyimpan creds + keys
 export interface WhatsappAuthState {
   session: WhatsappSession;
   creds: AuthenticationCreds;
@@ -47,6 +48,7 @@ export interface WhatsappAuthState {
 }
 
 export interface IWhatsappRepository {
+  // Repository ini mengabstraksi penyimpanan sesi, kredensial, dan key store WhatsApp
   listSessions(): Promise<WhatsappSession[]>;
   findSessionByApiKey(apiKey: string): Promise<WhatsappSession | null>;
   ensureSession(apiKey: string, displayName?: string | null): Promise<WhatsappSession>;
@@ -68,6 +70,7 @@ export interface IWhatsappRepository {
 
 export const WHATSAPP_REPOSITORY_TOKEN = Symbol('WHATSAPP_REPOSITORY_TOKEN');
 
+// Abstraksi lock agar hanya satu instance yang memegang kunci koneksi per apiKey
 export interface IWhatsappLockRepository {
   acquire(apiKey: string, ownerId: string, ttlMs: number): Promise<boolean>;
   touch(apiKey: string, ownerId: string): Promise<void>;
